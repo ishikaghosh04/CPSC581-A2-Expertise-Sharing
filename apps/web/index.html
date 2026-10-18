@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lighting Teacher</title>
+    <link rel="stylesheet" href="/src/style.css" />
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <main class="wrap">
+      <section id="landing" class="card">
+        <h1>Lighting Teacher</h1>
+        <p class="muted">
+          CPSC 581 A2 expertise-sharing prototype. The expert frames a camera and
+          lights a scene; the novice tries to replicate it from a reference image.
+        </p>
+        <div class="row">
+          <button id="create-btn" class="primary">Create session (expert)</button>
+        </div>
+        <div class="row">
+          <input
+            id="join-code"
+            maxlength="5"
+            placeholder="CODE"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="join-btn">Join as novice</button>
+        </div>
+        <p id="landing-error" class="error"></p>
+      </section>
+
+      <section id="app" class="card hidden">
+        <header class="app-header">
+          <h1>Session <span id="session-code" class="code"></span></h1>
+          <button id="copy-code" class="copy-btn">Copy</button>
+          <button id="leave-btn" class="copy-btn">Leave</button>
+          <span id="role-tag" class="pill"></span>
+          <span id="connection-state" class="muted"></span>
+        </header>
+
+        <div id="role-panel" class="chips"></div>
+
+        <section id="viewport" class="hidden">
+          <div id="work-task-row" class="work-task-row hidden">
+            <span class="muted">Working on</span>
+            <select id="work-task" aria-label="Task to work on"></select>
+          </div>
+          <div class="viewport-row">
+            <div id="scene-mount"></div>
+            <section id="preview" class="hidden">
+              <canvas id="preview-canvas" width="320" height="180"></canvas>
+              <span class="preview-label">Reference preview (no helpers)</span>
+            </section>
+            <img id="reference" class="reference hidden" alt="Reference image from the expert" />
+          </div>
+          <div class="toolbar">
+            <button id="toggle-move">Move light</button>
+            <button id="toggle-aim">Aim light</button>
+            <span class="sep"></span>
+            <button id="reset-camera">Reset camera</button>
+            <button id="reset-light">Reset light</button>
+            <span class="sep"></span>
+            <button id="publish-btn" class="hidden primary">Publish task</button>
+            <button id="submit-btn" class="hidden primary">Submit attempt</button>
+          </div>
+          <div class="toolbar intensity-row">
+            <span class="muted">Intensity</span>
+            <label><input type="radio" name="intensity" value="low" />Low</label>
+            <label><input type="radio" name="intensity" value="medium" checked />Med</label>
+            <label><input type="radio" name="intensity" value="high" />High</label>
+          </div>
+          <p class="muted chat-hint">Chat panel arrives in build step 5.</p>
+        </section>
+      </section>
+
+      <section id="attempts" class="card hidden">
+        <h2>Published tasks &amp; submissions</h2>
+        <div class="compare-row">
+          <figure class="compare-cell">
+            <span class="compare-label">Published task</span>
+            <select id="task-select" aria-label="Published task"></select>
+            <img id="published-image" class="attempt-image hidden" alt="Published task reference" />
+          </figure>
+          <figure class="compare-cell">
+            <span class="compare-label">Selected submission</span>
+            <select id="attempt-select" aria-label="Submission"></select>
+            <img id="attempt-image" class="attempt-image hidden" alt="Selected attempt" />
+            <span id="attempt-empty" class="muted hidden">No submissions for this task yet.</span>
+          </figure>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
