@@ -13,9 +13,9 @@ A 1-on-1, browser-based CAD lighting teaching demo. The object of study is *whet
 1. Expert starts a session → gets a join code.
 2. Novice joins by code (laptop browser; phone joins the same room in phase 2).
 3. Expert frames the camera, moves/aims the spotlight, sets intensity → presses **Publish task**.
-4. Server renders the expert's view *offscreen with the light source hidden* → sends the reference image + its stored state (camera pose, light position/direction/intensity — kept for later hint/diff features, never shown to the novice).
+4. Server renders the expert's view *offscreen with the light source hidden* → sends the reference image and retains that task's camera/light state server-side for private expert diffs and opt-in novice hints.
 5. (Undecided if will add) Novice works live: orbits their camera and manipulates their own light to make their view match the reference picture. The expert sees **both scenes side-by-side, live**, but there is **no numeric guidance** — the reference image is the only guide, and "match it by eye" is part of the task.
-6. Novice submits → expert compares expert-side vs novice-side renders and chats feedback. Text chat both ways is the v1 feedback channel.
+6. Novice submits → expert compares the target and novice attempt, with per-task state differences visible only to the expert. Text chat works both ways; the expert also gets varied, selectable feedback suggestions from the shared comparison logic.
 
 ## Controls (phase 1, keyboard/mouse)
 
@@ -55,4 +55,4 @@ Each step leaves a working milestone:
    - Hand tracking: 1/2/3 fingers → low/medium/high intensity; require a briefly stable gesture to prevent accidental changes.
    - Head tracking: map small head movements to a limited camera movement; sensitivity and reset controls.
    - Voice commands (optional): "left," "right," "up," "down," and brightness levels.
-6. **Feedback and accessibility polish** — expert-authored hints the novice may choose to use; per-feature keyboard/on-screen fallbacks; allow seated use, pausing, and disabling camera movement.
+6. **Feedback and accessibility polish** — the novice may request one state-based hint at a time; per-feature keyboard/on-screen fallbacks; allow seated use, pausing, and disabling camera movement.

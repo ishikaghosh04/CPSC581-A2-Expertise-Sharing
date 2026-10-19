@@ -7,13 +7,22 @@ import { Server } from 'socket.io';
 
 import type {
   Attempt,
+  AttemptReview,
+  AudioFeedbackAttribute,
   CameraState,
   ClientToServerEvents,
   LightState,
   Role,
   ServerToClientEvents,
   StateSnapshot,
+  TaskTarget,
   TaskEntry,
+} from '@expertise-sharing/shared';
+import {
+  compareTaskStates,
+  DEFAULT_TOLERANCES,
+  feedbackSuggestions,
+  nextTaskHint,
 } from '@expertise-sharing/shared';
 
 import { renderReferencePlaceholder } from './reference.js';
@@ -29,6 +38,32 @@ import {
 } from './sessions.js';
 
 const PORT = Number(process.env.PORT ?? 3000);
+const MAX_CHAT_LENGTH = 500;
+const AUDIO_FEEDBACK_ATTRIBUTES: AudioFeedbackAttribute[] = [
+  'camera-position',
+  'camera-aim',
+  'light-position',
+  'light-aim',
+  'intensity',
+];
+
+function audioFeedbackMetrics(
+  diff: ReturnType<typeof compareTaskStates>,
+  attribute: AudioFeedbackAttribute
+): { distance: number; tolerance: number } {
+  switch (attribute) {
+    case 'camera-position':
+      return { distance: diff.cameraPositionDistance, tolerance: DEFAULT_TOLERANCES.position };
+    case 'camera-aim':
+      return { distance: diff.cameraTargetDistance, tolerance: DEFAULT_TOLERANCES.position };
+    case 'light-position':
+      return { distance: diff.lightPositionDistance, tolerance: DEFAULT_TOLERANCES.position };
+    case 'light-aim':
+      return { distance: diff.lightAimAngleDegrees, tolerance: DEFAULT_TOLERANCES.angle };
+    case 'intensity':
+      return { distance: diff.lightIntensityDifference, tolerance: DEFAULT_TOLERANCES.intensity };
+  }
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -39,6 +74,12 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer);
 
 io.on('connection', (socket) => {
   let role: Role | undefined;
+  let audioFeedbackSelection: {
+    taskId: number;
+    attribute: AudioFeedbackAttribute;
+    lastDistance: number;
+    lastCueDistance: number;
+  } | null = null;
 
   const sessionOf = (): Session | undefined => getSessionBySocket(socket.id);
 
@@ -80,8 +121,11 @@ io.on('connection', (socket) => {
     socket.join(session.code);
     ack({ ok: true, role, meta: sessionMeta(session) });
     // Late joiners see the current reference image straight away.
-    if (session.phase === 'task' && session.referenceImage) {
-      socket.emit('task:start', { referenceImage: session.referenceImage });
+    if (session.phase === 'task' && session.referenceImage && session.currentTaskId !== null) {
+      socket.emit('task:start', {
+        taskId: session.currentTaskId,
+        referenceImage: session.referenceImage,
+      });
     }
     if (session.attempts.length > 0) {
       socket.emit('attempts:current', session.attempts);
@@ -97,12 +141,39 @@ io.on('connection', (socket) => {
     if (!session || !role) return;
     session.live[role] = { camera, light };
     socket.to(session.code).emit('peer:update', { from: role, snapshot: { camera, light } });
+
+    if (role !== 'novice' || !audioFeedbackSelection) return;
+    const selection = audioFeedbackSelection;
+    const target = session.taskTargets.get(selection.taskId);
+    if (!target) {
+      audioFeedbackSelection = null;
+      socket.emit('audio-feedback:error', 'The selected task is no longer available for audio feedback.');
+      return;
+    }
+    const { distance, tolerance } = audioFeedbackMetrics(
+      compareTaskStates(target, { camera, light }),
+      selection.attribute
+    );
+    const movedAway = distance > selection.lastDistance;
+    const enteredTolerance = selection.lastDistance > tolerance && distance <= tolerance;
+    const improvedEnough = selection.lastCueDistance - distance >= tolerance * 0.05;
+    if (improvedEnough || enteredTolerance) {
+      socket.emit('audio-feedback:progress', {
+        taskId: selection.taskId,
+        attribute: selection.attribute,
+        withinTolerance: distance <= tolerance,
+        enteredTolerance,
+      });
+      selection.lastCueDistance = distance;
+    } else if (movedAway) {
+      selection.lastCueDistance = distance;
+    }
+    selection.lastDistance = distance;
   });
 
   socket.on('task:publish', ({ camera, light, referenceImage }) => {
     const session = sessionOf();
     if (!session || role !== 'expert') return;
-    session.target = { camera, light, referenceImage };
     // Use the expert-side capture when present; otherwise fall back to a placeholder.
     session.referenceImage =
       typeof referenceImage === 'string' && referenceImage.startsWith('data:image/')
@@ -117,11 +188,60 @@ io.on('connection', (socket) => {
       referenceImage: session.referenceImage,
       createdAt: Date.now(),
     };
+    const target: TaskTarget = {
+      camera,
+      light,
+      referenceImage: session.referenceImage,
+    };
+    session.taskTargets.set(task.id, target);
     session.tasks.push(task);
     session.currentTaskId = task.id;
-    io.to(session.code).emit('task:start', { referenceImage: session.referenceImage });
+    io.to(session.code).emit('task:start', {
+      taskId: task.id,
+      referenceImage: session.referenceImage,
+    });
     io.to(session.code).emit('task:published', task);
     io.to(session.code).emit('session:meta', sessionMeta(session));
+  });
+
+  socket.on('hint:request', ({ taskId, snapshot }) => {
+    const session = sessionOf();
+    if (!session || role !== 'novice') return;
+    const target = session.taskTargets.get(taskId);
+    if (!target) {
+      socket.emit('hint:error', 'That task is no longer available for hints.');
+      return;
+    }
+    socket.emit('hint:result', nextTaskHint(target, snapshot));
+  });
+
+  socket.on('audio-feedback:select', (selection) => {
+    if (role !== 'novice') return;
+    audioFeedbackSelection = null;
+    if (!selection) {
+      return;
+    }
+    if (
+      !Number.isSafeInteger(selection.taskId) ||
+      !AUDIO_FEEDBACK_ATTRIBUTES.includes(selection.attribute)
+    ) {
+      socket.emit('audio-feedback:error', 'That audio feedback selection is invalid.');
+      return;
+    }
+    const session = sessionOf();
+    const target = session?.taskTargets.get(selection.taskId);
+    if (!session || !target) {
+      socket.emit('audio-feedback:error', 'That task is no longer available for audio feedback.');
+      return;
+    }
+    const initialDiff = compareTaskStates(target, selection.snapshot);
+    const initialDistance = audioFeedbackMetrics(initialDiff, selection.attribute).distance;
+    audioFeedbackSelection = {
+      taskId: selection.taskId,
+      attribute: selection.attribute,
+      lastDistance: initialDistance,
+      lastCueDistance: initialDistance,
+    };
   });
 
   socket.on('attempt:submit', (payload) => {
@@ -129,7 +249,6 @@ io.on('connection', (socket) => {
     if (!session || role !== 'novice') return;
     // Multiple attempts allowed while a task is live (task or already-submitted phase).
     if (session.phase !== 'task' && session.phase !== 'submitted') return;
-    if (!session.target) return;
     if (
       typeof payload.image !== 'string' ||
       !payload.image.startsWith('data:image/')
@@ -140,6 +259,8 @@ io.on('connection', (socket) => {
     const targetTask = session.tasks.find((t) => t.id === requestedTaskId);
     const taskId = targetTask ? targetTask.id : session.currentTaskId;
     if (taskId === null) return;
+    const target = session.taskTargets.get(taskId);
+    if (!target) return;
     const attempt: Attempt = {
       id: session.nextAttemptId++,
       taskId,
@@ -153,19 +274,36 @@ io.on('connection', (socket) => {
     session.submitted = true;
     io.to(session.code).emit('attempt:saved', attempt);
     io.to(session.code).emit('attempt:submitted');
+    const expertId = session.members.expert;
+    if (expertId) {
+      const snapshot = { camera: attempt.camera, light: attempt.light };
+      const review: AttemptReview = {
+        attemptId: attempt.id,
+        taskId,
+        diff: compareTaskStates(target, snapshot),
+        suggestions: feedbackSuggestions(target, snapshot),
+      };
+      io.to(expertId).emit('attempt:review', review);
+    }
     io.to(session.code).emit('session:meta', sessionMeta(session));
   });
 
   socket.on('chat:message', (text) => {
     const session = sessionOf();
     if (!session || !role) return;
-    io.to(session.code).emit('chat:message', { from: role, text });
+    const message = typeof text === 'string' ? text.trim() : '';
+    if (message.length === 0 || message.length > MAX_CHAT_LENGTH) {
+      socket.emit('chat:error', `Messages must be 1-${MAX_CHAT_LENGTH} characters.`);
+      return;
+    }
+    io.to(session.code).emit('chat:message', { from: role, text: message });
   });
 
   socket.on('session:leave', () => {
     const session = sessionOf();
     if (!session || !role) return;
     releaseMember(session, socket.id);
+    audioFeedbackSelection = null;
     if (!dropIfEmpty(session)) {
       io.to(session.code).emit('session:meta', sessionMeta(session));
     }

@@ -57,6 +57,35 @@ export interface TaskTarget {
   referenceImage: string;
 }
 
+export interface TaskDiff {
+  cameraPositionDistance: number;
+  cameraTargetDistance: number;
+  lightPositionDistance: number;
+  lightAimAngleDegrees: number;
+  lightIntensityDifference: number;
+}
+
+export interface TaskHint {
+  component: 'camera-position' | 'camera-aim' | 'light-position' | 'light-aim' | 'intensity';
+  text: string;
+}
+
+export type AudioFeedbackAttribute = TaskHint['component'];
+
+export interface AudioFeedbackProgress {
+  taskId: number;
+  attribute: AudioFeedbackAttribute;
+  withinTolerance: boolean;
+  enteredTolerance: boolean;
+}
+
+export interface AttemptReview {
+  attemptId: number;
+  taskId: number;
+  diff: TaskDiff;
+  suggestions: string[];
+}
+
 export interface JoinResult {
   ok: boolean;
   role?: Role;
@@ -66,6 +95,7 @@ export interface JoinResult {
 
 /** Payload sent when a task starts. The target state stays server-side; novices only get the image. */
 export interface TaskStart {
+  taskId: number;
   /** Data URL of the reference render (expert's view, light source hidden). */
   referenceImage: string;
 }
@@ -117,6 +147,14 @@ export interface ClientToServerEvents {
   'state:update': (snapshot: StateSnapshot) => void;
   /** Expert publishes (or replaces) the target state and starts the task. */
   'task:publish': (target: TaskTarget) => void;
+  /** Novice requests a single opt-in hint for the selected task. */
+  'hint:request': (request: { taskId: number; snapshot: StateSnapshot }) => void;
+  /** Novice opts into progress cues for one attribute on the selected task. */
+  'audio-feedback:select': (selection: {
+    taskId: number;
+    attribute: AudioFeedbackAttribute;
+    snapshot: StateSnapshot;
+  } | null) => void;
   /** Novice submits an attempt snapshot (renders its own view, helpers hidden). */
   'attempt:submit': (attempt: AttemptPayload) => void;
   'chat:message': (text: string) => void;
@@ -129,9 +167,24 @@ export interface ServerToClientEvents {
   'task:published': (task: TaskEntry) => void;
   'attempt:submitted': () => void;
   'attempt:saved': (attempt: Attempt) => void;
+  /** Detailed setup differences are delivered only to the expert. */
+  'attempt:review': (review: AttemptReview) => void;
+  'hint:result': (hint: TaskHint | null) => void;
+  'hint:error': (message: string) => void;
+  /** Qualitative progress cue for the novice's selected audio-feedback attribute. */
+  'audio-feedback:progress': (progress: AudioFeedbackProgress) => void;
+  'audio-feedback:error': (message: string) => void;
+  'chat:error': (message: string) => void;
   /** Full history replay (late joiners). */
   'tasks:current': (tasks: TaskEntry[]) => void;
   'attempts:current': (attempts: Attempt[]) => void;
   'peer:update': (msg: { from: Role; snapshot: StateSnapshot }) => void;
   'chat:message': (msg: ChatMessage) => void;
 }
+
+export {
+  compareTaskStates,
+  DEFAULT_TOLERANCES,
+  feedbackSuggestions,
+  nextTaskHint,
+} from './feedback.js';

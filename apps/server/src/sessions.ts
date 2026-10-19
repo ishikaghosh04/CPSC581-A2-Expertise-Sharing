@@ -34,8 +34,8 @@ export interface Session {
   members: Partial<Record<Role, string>>;
   /** Live state per role, streamed with `state:update`. */
   live: Partial<Record<Role, LiveState>>;
-  /** The expert's published target state (active task). Kept server-side (future hints/diff). */
-  target: TaskTarget | null;
+  /** Target states stay server-side and remain available for prior task attempts. */
+  taskTargets: Map<number, TaskTarget>;
   /** Data URL of the reference render for the active task. */
   referenceImage: string | null;
   /** Published task history — cleaned of attempts but never wiped per publish. */
@@ -67,7 +67,7 @@ export function newSession(): Session {
     submitted: false,
     members: {},
     live: {},
-    target: null,
+    taskTargets: new Map(),
     referenceImage: null,
     tasks: [],
     currentTaskId: null,
@@ -111,7 +111,7 @@ export function releaseMember(session: Session, socketId: string): void {
 }
 
 export function dropIfEmpty(session: Session): boolean {
-  if (session.members.expert || session.members.novice) return false;
+  if (session.members.expert && session.members.novice) return false;
   sessions.delete(session.code);
   return true;
 }

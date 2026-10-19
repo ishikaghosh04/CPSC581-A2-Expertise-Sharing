@@ -1,7 +1,11 @@
 import { io, type Socket } from 'socket.io-client';
 
+import { DEFAULT_TOLERANCES } from '@expertise-sharing/shared';
 import type {
   Attempt,
+  AttemptReview,
+  AudioFeedbackAttribute,
+  ChatMessage,
   ClientToServerEvents,
   IntensityPreset,
   Role,
@@ -43,6 +47,11 @@ const previewPanel = el<HTMLElement>('#preview');
 const previewCanvas = el<HTMLCanvasElement>('#preview-canvas');
 const publishBtn = el<HTMLButtonElement>('#publish-btn');
 const submitBtn = el<HTMLButtonElement>('#submit-btn');
+const actionStatus = el<HTMLParagraphElement>('#action-status');
+const actionConfirmDialog = el<HTMLDialogElement>('#action-confirm-dialog');
+const actionConfirmTitle = el<HTMLHeadingElement>('#action-confirm-title');
+const actionConfirmMessage = el<HTMLParagraphElement>('#action-confirm-message');
+const actionConfirmButton = el<HTMLButtonElement>('#action-confirm-button');
 const attemptsPanel = el<HTMLElement>('#attempts');
 const workTaskRow = el<HTMLElement>('#work-task-row');
 const workTaskSelect = el<HTMLSelectElement>('#work-task');
@@ -51,6 +60,21 @@ const attemptSelect = el<HTMLSelectElement>('#attempt-select');
 const attemptImage = el<HTMLImageElement>('#attempt-image');
 const publishedImage = el<HTMLImageElement>('#published-image');
 const attemptEmpty = el<HTMLSpanElement>('#attempt-empty');
+const hintPanel = el<HTMLElement>('#hint-panel');
+const requestHintBtn = el<HTMLButtonElement>('#request-hint');
+const hintText = el<HTMLParagraphElement>('#hint-text');
+const audioFeedbackStatus = el<HTMLParagraphElement>('#audio-feedback-status');
+const audioFeedbackButtons = Array.from(
+  document.querySelectorAll<HTMLButtonElement>('[data-audio-attribute]')
+);
+const chatMessages = el<HTMLDivElement>('#chat-messages');
+const chatForm = el<HTMLFormElement>('#chat-form');
+const chatInput = el<HTMLInputElement>('#chat-input');
+const chatError = el<HTMLParagraphElement>('#chat-error');
+const feedbackSuggestions = el<HTMLElement>('#feedback-suggestions');
+const suggestionButtons = el<HTMLDivElement>('#suggestion-buttons');
+const diffPanel = el<HTMLElement>('#diff-panel');
+const diffSummary = el<HTMLUListElement>('#diff-summary');
 
 let role: Role | null = null;
 let phase: SessionMeta['phase'] = 'lobby';
@@ -59,14 +83,147 @@ let scene: SceneHandle | null = null;
 let activeHandle: LightHandle = 'bulb';
 let tasks: TaskEntry[] = [];
 let attempts: Attempt[] = [];
+const reviews = new Map<number, AttemptReview>();
 /** The task the novice is currently working on (drives their reference view and submits). */
 let activeTaskId: number | null = null;
+let selectedAudioAttribute: AudioFeedbackAttribute | null = null;
+let audioContext: AudioContext | null = null;
+let audioUnavailable = false;
+let lastAudioCueAt = 0;
+let pendingSubmissionTaskId: number | null = null;
+let pendingConfirmedAction: 'publish' | 'submit' | null = null;
+
+const AUDIO_FEEDBACK_ATTRIBUTES: Array<{ value: AudioFeedbackAttribute; label: string }> = [
+  { value: 'camera-position', label: 'Camera position' },
+  { value: 'camera-aim', label: 'Camera aim' },
+  { value: 'light-position', label: 'Light position' },
+  { value: 'light-aim', label: 'Light aim' },
+  { value: 'intensity', label: 'Brightness' },
+];
+
+function audioFeedbackLabel(attribute: AudioFeedbackAttribute): string {
+  return AUDIO_FEEDBACK_ATTRIBUTES.find((item) => item.value === attribute)?.label
+    ?? 'Selected attribute';
+}
+
+function syncAudioFeedbackSelection(): void {
+  if (role !== 'novice' || !scene) return;
+  if (activeTaskId === null || selectedAudioAttribute === null) {
+    socket.emit('audio-feedback:select', null);
+    return;
+  }
+  socket.emit('audio-feedback:select', {
+    taskId: activeTaskId,
+    attribute: selectedAudioAttribute,
+    snapshot: scene.state(),
+  });
+}
+
+function enableAudioFeedback(): void {
+  if (typeof AudioContext === 'undefined') {
+    audioUnavailable = true;
+    audioFeedbackStatus.textContent = 'Audio feedback is not supported in this browser.';
+    return;
+  }
+  audioUnavailable = false;
+  audioContext ??= new AudioContext();
+  void audioContext.resume().catch((error: unknown) => {
+    audioUnavailable = true;
+    console.error('could not enable audio feedback', error);
+    audioFeedbackStatus.textContent = 'Audio could not be enabled. Check your browser sound settings.';
+  });
+}
+
+function playTone(
+  context: AudioContext,
+  startFrequency: number,
+  endFrequency: number,
+  startTime: number,
+  duration: number
+): void {
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(startFrequency, startTime);
+  oscillator.frequency.exponentialRampToValueAtTime(endFrequency, startTime + duration);
+  gain.gain.setValueAtTime(0.0001, startTime);
+  gain.gain.exponentialRampToValueAtTime(0.08, startTime + 0.015);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(startTime);
+  oscillator.stop(startTime + duration);
+}
+
+function playProgressCue(enteredTolerance: boolean): void {
+  if (!audioContext || audioContext.state !== 'running') return;
+  const now = audioContext.currentTime;
+  if (enteredTolerance) {
+    playTone(audioContext, 660, 880, now, 0.12);
+    playTone(audioContext, 880, 1100, now + 0.13, 0.16);
+  } else {
+    playTone(audioContext, 440, 660, now, 0.16);
+  }
+}
 
 function chip(text: string, on = false): HTMLSpanElement {
   const span = document.createElement('span');
   span.className = on ? 'chip on' : 'chip';
   span.textContent = text;
   return span;
+}
+
+function setActionStatus(
+  message: string,
+  status: 'pending' | 'success' | 'error' = 'pending'
+): void {
+  actionStatus.textContent = message;
+  actionStatus.dataset.status = message ? status : '';
+}
+
+function requestActionConfirmation(action: 'publish' | 'submit'): void {
+  pendingConfirmedAction = action;
+  if (action === 'publish') {
+    actionConfirmTitle.textContent = 'Ready to publish?';
+    actionConfirmMessage.textContent = 'This will publish the current camera and lighting setup as a task for the novice.';
+    actionConfirmButton.textContent = 'Publish task';
+  } else {
+    actionConfirmTitle.textContent = 'Ready to submit?';
+    actionConfirmMessage.textContent = 'This will submit your current camera and lighting attempt for expert review.';
+    actionConfirmButton.textContent = 'Submit attempt';
+  }
+  actionConfirmDialog.showModal();
+}
+
+function publishTask(): void {
+  if (role !== 'expert' || !scene) return;
+  setActionStatus('Publishing task…');
+  scene
+    .captureReference()
+    .then((referenceImage) => {
+      const { camera, light } = scene!.state();
+      socket.emit('task:publish', { camera, light, referenceImage });
+    })
+    .catch((err: unknown) => {
+      console.error('reference capture failed', err);
+      setActionStatus('Could not publish the task. Please try again.', 'error');
+    });
+}
+
+function submitAttempt(): void {
+  if (role !== 'novice' || !scene || activeTaskId === null) return;
+  const { camera, light } = scene.state();
+  const taskId = activeTaskId;
+  pendingSubmissionTaskId = taskId;
+  setActionStatus('Submitting attempt…');
+  scene
+    .captureReference()
+    .then((image) => socket.emit('attempt:submit', { taskId, camera, light, image }))
+    .catch((err: unknown) => {
+      console.error('attempt capture failed', err);
+      pendingSubmissionTaskId = null;
+      setActionStatus('Could not submit the attempt. Please try again.', 'error');
+    });
 }
 
 function showApp(): void {
@@ -128,6 +285,7 @@ function refreshWorkSelect(selectTaskId?: number): void {
   } else {
     activeTaskId = null;
   }
+  syncAudioFeedbackSelection();
 }
 
 function renderMeta(meta: SessionMeta): void {
@@ -136,6 +294,9 @@ function renderMeta(meta: SessionMeta): void {
   sessionCode.textContent = meta.code;
   roleTag.textContent = role === 'expert' ? 'Expert' : 'Novice';
   updateRoleButtons(meta);
+  hintPanel.classList.toggle('hidden', role !== 'novice');
+  diffPanel.classList.toggle('hidden', role !== 'expert');
+  feedbackSuggestions.classList.toggle('hidden', role !== 'expert');
   updateSideView();
 
   rolePanel.replaceChildren(
@@ -233,24 +394,21 @@ document.querySelectorAll<HTMLInputElement>('input[name="intensity"]').forEach((
 
 publishBtn.addEventListener('click', () => {
   if (role !== 'expert' || !scene) return;
-  scene
-    .captureReference()
-    .then((referenceImage) => {
-      const { camera, light } = scene!.state();
-      socket.emit('task:publish', { camera, light, referenceImage });
-    })
-    .catch((err) => console.error('reference capture failed', err));
+  requestActionConfirmation('publish');
 });
 
 submitBtn.addEventListener('click', () => {
   if (role !== 'novice' || !scene) return;
   if (activeTaskId === null) return;
-  const { camera, light } = scene.state();
-  const taskId = activeTaskId;
-  scene
-    .captureReference()
-    .then((image) => socket.emit('attempt:submit', { taskId, camera, light, image }))
-    .catch((err) => console.error('attempt capture failed', err));
+  requestActionConfirmation('submit');
+});
+
+actionConfirmDialog.addEventListener('close', () => {
+  const action = pendingConfirmedAction;
+  pendingConfirmedAction = null;
+  if (actionConfirmDialog.returnValue !== 'confirm' || !action) return;
+  if (action === 'publish') publishTask();
+  else submitAttempt();
 });
 
 // --- Published tasks & submissions -----------------------------------------
@@ -278,6 +436,59 @@ function showAttempt(attempt: Attempt | undefined): void {
   }
   attemptImage.src = attempt.image;
   attemptImage.classList.remove('hidden');
+}
+
+function renderReview(attemptId: number | undefined): void {
+  const review = attemptId === undefined ? undefined : reviews.get(attemptId);
+  diffSummary.replaceChildren();
+  suggestionButtons.replaceChildren();
+  feedbackSuggestions.classList.toggle('hidden', role !== 'expert' || !review);
+  diffPanel.classList.toggle('hidden', role !== 'expert' || !review);
+  if (!review) return;
+
+  const rows: Array<[string, number, number, string, number]> = [
+    ['Camera position', review.diff.cameraPositionDistance, DEFAULT_TOLERANCES.position, 'units away', 1],
+    ['Camera aim point', review.diff.cameraTargetDistance, DEFAULT_TOLERANCES.position, 'units away', 1],
+    ['Light position', review.diff.lightPositionDistance, DEFAULT_TOLERANCES.position, 'units away', 1],
+    ['Light aim', review.diff.lightAimAngleDegrees, DEFAULT_TOLERANCES.angle, '° off', 1],
+    ['Brightness', review.diff.lightIntensityDifference, DEFAULT_TOLERANCES.intensity, 'intensity off', 2],
+  ];
+  diffSummary.replaceChildren(...rows.map(([label, value, tolerance, unit, precision]) => {
+    const item = document.createElement('li');
+    const name = document.createElement('span');
+    name.textContent = `${label}: `;
+    const status = document.createElement('strong');
+    status.className = value <= tolerance ? 'diff-value correct' : 'diff-value';
+    status.textContent = value <= tolerance
+      ? 'Correct'
+      : `${value.toFixed(precision)} ${unit}`;
+    item.append(name, status);
+    return item;
+  }));
+
+  for (const suggestion of review.suggestions) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'suggestion-button';
+    button.textContent = suggestion;
+    button.addEventListener('click', () => {
+      chatInput.value = suggestion;
+      chatInput.focus();
+    });
+    suggestionButtons.append(button);
+  }
+}
+
+function appendChatMessage(message: ChatMessage): void {
+  const entry = document.createElement('p');
+  entry.className = `chat-message ${message.from}`;
+  const sender = document.createElement('strong');
+  sender.textContent = `${message.from === 'expert' ? 'Expert' : 'Novice'}: `;
+  const content = document.createElement('span');
+  content.textContent = message.text;
+  entry.append(sender, content);
+  chatMessages.append(entry);
+  chatMessages.scrollTop = chatMessages.scrollHeight;
 }
 
 function refreshTasksUi(selectTaskId?: number): void {
@@ -314,17 +525,26 @@ function refreshAttemptOptions(taskId: number | undefined): void {
     attemptSelect.value = String(newest.id);
     showAttempt(newest);
     attemptEmpty.classList.add('hidden');
+    renderReview(newest.id);
   } else {
     showAttempt(undefined);
     attemptSelect.value = '';
     attemptEmpty.classList.remove('hidden');
+    renderReview(undefined);
   }
 }
 
 function clearTaskUi(): void {
   tasks = [];
   attempts = [];
+  reviews.clear();
   activeTaskId = null;
+  pendingSubmissionTaskId = null;
+  setActionStatus('');
+  selectedAudioAttribute = null;
+  audioFeedbackButtons.forEach((button) => button.setAttribute('aria-pressed', 'false'));
+  audioFeedbackStatus.textContent = 'Select an attribute to hear when it gets closer to the target.';
+  syncAudioFeedbackSelection();
   taskSelect.replaceChildren();
   attemptSelect.replaceChildren();
   workTaskSelect.replaceChildren();
@@ -334,6 +554,12 @@ function clearTaskUi(): void {
   publishedImage.removeAttribute('src');
   attemptEmpty.classList.remove('hidden');
   attemptsPanel.classList.add('hidden');
+  diffSummary.replaceChildren();
+  suggestionButtons.replaceChildren();
+  feedbackSuggestions.classList.add('hidden');
+  hintText.textContent = 'Hints are optional.';
+  chatMessages.replaceChildren();
+  chatError.textContent = '';
 }
 
 taskSelect.addEventListener('change', () => {
@@ -341,12 +567,56 @@ taskSelect.addEventListener('change', () => {
 });
 
 attemptSelect.addEventListener('change', () => {
-  showAttempt(attempts.find((a) => a.id === Number(attemptSelect.value)));
+  const attempt = attempts.find((a) => a.id === Number(attemptSelect.value));
+  showAttempt(attempt);
+  renderReview(attempt?.id);
 });
 
 workTaskSelect.addEventListener('change', () => {
   activeTaskId = Number(workTaskSelect.value);
+  hintText.textContent = 'Hints are optional.';
+  audioFeedbackStatus.textContent = selectedAudioAttribute
+    ? `${audioFeedbackLabel(selectedAudioAttribute)} selected. Adjust it to hear progress cues.`
+    : 'Select an attribute to hear when it gets closer to the target.';
+  syncAudioFeedbackSelection();
   updateSideView();
+});
+
+audioFeedbackButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    const attribute = AUDIO_FEEDBACK_ATTRIBUTES.find(
+      (item) => item.value === button.dataset.audioAttribute
+    )?.value;
+    if (!attribute) throw new Error(`Unknown audio feedback attribute: ${button.dataset.audioAttribute}`);
+    selectedAudioAttribute = attribute;
+    audioFeedbackButtons.forEach((candidate) => {
+      candidate.setAttribute('aria-pressed', String(candidate === button));
+    });
+    enableAudioFeedback();
+    if (!audioUnavailable) {
+      audioFeedbackStatus.textContent = `${audioFeedbackLabel(attribute)} selected. Adjust it to hear progress cues.`;
+    }
+    syncAudioFeedbackSelection();
+  });
+});
+
+requestHintBtn.addEventListener('click', () => {
+  if (role !== 'novice' || activeTaskId === null || !scene) return;
+  hintText.textContent = 'Finding a hint...';
+  socket.emit('hint:request', { taskId: activeTaskId, snapshot: scene.state() });
+});
+
+chatForm.addEventListener('submit', (event) => {
+  event.preventDefault();
+  const text = chatInput.value.trim();
+  if (!text) return;
+  if (text.length > 500) {
+    chatError.textContent = 'Messages must be 500 characters or fewer.';
+    return;
+  }
+  chatError.textContent = '';
+  socket.emit('chat:message', text);
+  chatInput.value = '';
 });
 
 leaveBtn.addEventListener('click', () => {
@@ -383,9 +653,16 @@ socket.on('session:meta', (meta) => {
   renderMeta(meta);
 });
 
-socket.on('task:start', () => {
+socket.on('task:start', ({ taskId }) => {
   // The novice's reference view is driven by their selected task;
   // a session:meta tick follows for the phase chips.
+  if (role === 'novice') {
+    activeTaskId = taskId;
+    pendingSubmissionTaskId = null;
+    setActionStatus('');
+    hintText.textContent = 'Hints are optional.';
+    syncAudioFeedbackSelection();
+  }
   if (lastMeta) updateSideView();
 });
 
@@ -394,6 +671,9 @@ socket.on('task:published', (task) => {
   // submission list starts empty.
   tasks = tasks.filter((t) => t.id !== task.id).concat(task);
   refreshTasksUi(task.id);
+  if (role === 'expert') {
+    setActionStatus('Task published successfully.', 'success');
+  }
 });
 
 socket.on('attempt:submitted', () => {
@@ -402,9 +682,51 @@ socket.on('attempt:submitted', () => {
 
 socket.on('attempt:saved', (attempt) => {
   attempts = attempts.filter((a) => a.id !== attempt.id).concat(attempt);
+  if (role === 'novice' && pendingSubmissionTaskId === attempt.taskId) {
+    pendingSubmissionTaskId = null;
+    setActionStatus('Attempt submitted successfully.', 'success');
+  }
   if (Number(taskSelect.value) === attempt.taskId) {
     refreshAttemptOptions(attempt.taskId);
   }
+});
+
+socket.on('attempt:review', (review) => {
+  reviews.set(review.attemptId, review);
+  if (Number(attemptSelect.value) === review.attemptId) {
+    renderReview(review.attemptId);
+  }
+});
+
+socket.on('hint:result', (hint) => {
+  hintText.textContent = hint?.text ?? 'You are within the target tolerances. Nice work.';
+});
+
+socket.on('hint:error', (message) => {
+  hintText.textContent = message;
+});
+
+socket.on('audio-feedback:progress', (progress) => {
+  if (
+    role !== 'novice' ||
+    progress.taskId !== activeTaskId ||
+    progress.attribute !== selectedAudioAttribute
+  ) return;
+  const label = audioFeedbackLabel(progress.attribute);
+  audioFeedbackStatus.textContent = audioUnavailable
+    ? `${label} is ${progress.withinTolerance ? 'within tolerance' : 'getting closer'}, but audio is unavailable.`
+    : progress.withinTolerance
+      ? `${label} is within tolerance.`
+      : `${label} is getting closer.`;
+  if (audioUnavailable) return;
+  const now = performance.now();
+  if (!progress.enteredTolerance && now - lastAudioCueAt < 350) return;
+  playProgressCue(progress.enteredTolerance);
+  lastAudioCueAt = now;
+});
+
+socket.on('audio-feedback:error', (message) => {
+  audioFeedbackStatus.textContent = message;
 });
 
 socket.on('tasks:current', (saved) => {
@@ -421,6 +743,10 @@ socket.on('peer:update', () => {
   // Live side-by-side rendering arrives in build step 4.
 });
 
-socket.on('chat:message', () => {
-  // Chat UI arrives in build step 5.
+socket.on('chat:message', (message) => {
+  appendChatMessage(message);
+});
+
+socket.on('chat:error', (message) => {
+  chatError.textContent = message;
 });
