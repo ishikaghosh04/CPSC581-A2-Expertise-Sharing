@@ -86,6 +86,13 @@ export interface AttemptReview {
   suggestions: string[];
 }
 
+export interface AttemptFeedback {
+  attemptId: number;
+  text: string;
+  createdAt: number;
+  unread: boolean;
+}
+
 export interface JoinResult {
   ok: boolean;
   role?: Role;
@@ -157,6 +164,10 @@ export interface ClientToServerEvents {
   } | null) => void;
   /** Novice submits an attempt snapshot (renders its own view, helpers hidden). */
   'attempt:submit': (attempt: AttemptPayload) => void;
+  /** Expert sends feedback attached to a submission. */
+  'feedback:send': (feedback: { attemptId: number; text: string }) => void;
+  /** Novice marks feedback for one submission as reviewed. */
+  'feedback:read': (attemptId: number) => void;
   'chat:message': (text: string) => void;
 }
 
@@ -167,6 +178,12 @@ export interface ServerToClientEvents {
   'task:published': (task: TaskEntry) => void;
   'attempt:submitted': () => void;
   'attempt:saved': (attempt: Attempt) => void;
+  /** Feedback associated with one attempt, sent to the novice. */
+  'feedback:new': (feedback: AttemptFeedback) => void;
+  /** Current feedback state replayed to a novice who joins late. */
+  'feedback:current': (feedback: AttemptFeedback[]) => void;
+  'feedback:saved': (feedback: AttemptFeedback) => void;
+  'feedback:error': (message: string) => void;
   /** Detailed setup differences are delivered only to the expert. */
   'attempt:review': (review: AttemptReview) => void;
   'hint:result': (hint: TaskHint | null) => void;

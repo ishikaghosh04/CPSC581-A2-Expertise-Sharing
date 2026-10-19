@@ -3,6 +3,7 @@ import { io, type Socket } from 'socket.io-client';
 import { DEFAULT_TOLERANCES } from '@expertise-sharing/shared';
 import type {
   Attempt,
+  AttemptFeedback,
   AttemptReview,
   AudioFeedbackAttribute,
   ChatMessage,
@@ -11,6 +12,7 @@ import type {
   Role,
   ServerToClientEvents,
   SessionMeta,
+  StateSnapshot,
   TaskEntry,
 } from '@expertise-sharing/shared';
 
@@ -53,6 +55,8 @@ const actionConfirmTitle = el<HTMLHeadingElement>('#action-confirm-title');
 const actionConfirmMessage = el<HTMLParagraphElement>('#action-confirm-message');
 const actionConfirmButton = el<HTMLButtonElement>('#action-confirm-button');
 const attemptsPanel = el<HTMLElement>('#attempts');
+const feedbackNotice = el<HTMLDivElement>('#feedback-notice');
+const feedbackNoticeButton = el<HTMLButtonElement>('#feedback-notice-button');
 const workTaskRow = el<HTMLElement>('#work-task-row');
 const workTaskSelect = el<HTMLSelectElement>('#work-task');
 const taskSelect = el<HTMLSelectElement>('#task-select');
@@ -60,6 +64,13 @@ const attemptSelect = el<HTMLSelectElement>('#attempt-select');
 const attemptImage = el<HTMLImageElement>('#attempt-image');
 const publishedImage = el<HTMLImageElement>('#published-image');
 const attemptEmpty = el<HTMLSpanElement>('#attempt-empty');
+const attemptFeedbackPanel = el<HTMLElement>('#attempt-feedback');
+const attemptFeedbackText = el<HTMLParagraphElement>('#attempt-feedback-text');
+const attemptFeedbackUnread = el<HTMLSpanElement>('#attempt-feedback-unread');
+const attemptFeedbackEditor = el<HTMLElement>('#attempt-feedback-editor');
+const attemptFeedbackInput = el<HTMLTextAreaElement>('#attempt-feedback-input');
+const sendAttemptFeedbackBtn = el<HTMLButtonElement>('#send-attempt-feedback');
+const feedbackStatus = el<HTMLParagraphElement>('#feedback-status');
 const hintPanel = el<HTMLElement>('#hint-panel');
 const requestHintBtn = el<HTMLButtonElement>('#request-hint');
 const hintText = el<HTMLParagraphElement>('#hint-text');
@@ -84,6 +95,7 @@ let activeHandle: LightHandle = 'bulb';
 let tasks: TaskEntry[] = [];
 let attempts: Attempt[] = [];
 const reviews = new Map<number, AttemptReview>();
+const attemptFeedback = new Map<number, AttemptFeedback>();
 /** The task the novice is currently working on (drives their reference view and submits). */
 let activeTaskId: number | null = null;
 let selectedAudioAttribute: AudioFeedbackAttribute | null = null;
@@ -92,6 +104,8 @@ let audioUnavailable = false;
 let lastAudioCueAt = 0;
 let pendingSubmissionTaskId: number | null = null;
 let pendingConfirmedAction: 'publish' | 'submit' | null = null;
+let submittedSnapshot: StateSnapshot | null = null;
+let publishStatusTimeout: number | null = null;
 
 const AUDIO_FEEDBACK_ATTRIBUTES: Array<{ value: AudioFeedbackAttribute; label: string }> = [
   { value: 'camera-position', label: 'Camera position' },
@@ -166,6 +180,17 @@ function playProgressCue(enteredTolerance: boolean): void {
   }
 }
 
+function refreshFeedbackNotice(): void {
+  const unread = role === 'novice'
+    ? [...attemptFeedback.values()].filter((feedback) => feedback.unread)
+    : [];
+  const latest = unread.sort((a, b) => b.createdAt - a.createdAt)[0];
+  feedbackNotice.classList.toggle('hidden', latest === undefined);
+  if (latest) {
+    feedbackNoticeButton.textContent = `Review Attempt ${latest.attemptId}`;
+  }
+}
+
 function chip(text: string, on = false): HTMLSpanElement {
   const span = document.createElement('span');
   span.className = on ? 'chip on' : 'chip';
@@ -177,8 +202,47 @@ function setActionStatus(
   message: string,
   status: 'pending' | 'success' | 'error' = 'pending'
 ): void {
+  if (publishStatusTimeout !== null) {
+    window.clearTimeout(publishStatusTimeout);
+    publishStatusTimeout = null;
+  }
   actionStatus.textContent = message;
   actionStatus.dataset.status = message ? status : '';
+}
+
+function stateChangedSinceSubmission(snapshot: StateSnapshot): boolean {
+  if (!submittedSnapshot) return false;
+  const currentValues = [
+    snapshot.camera.position.x,
+    snapshot.camera.position.y,
+    snapshot.camera.position.z,
+    snapshot.camera.target.x,
+    snapshot.camera.target.y,
+    snapshot.camera.target.z,
+    snapshot.light.position.x,
+    snapshot.light.position.y,
+    snapshot.light.position.z,
+    snapshot.light.target.x,
+    snapshot.light.target.y,
+    snapshot.light.target.z,
+    snapshot.light.intensity,
+  ];
+  const submittedValues = [
+    submittedSnapshot.camera.position.x,
+    submittedSnapshot.camera.position.y,
+    submittedSnapshot.camera.position.z,
+    submittedSnapshot.camera.target.x,
+    submittedSnapshot.camera.target.y,
+    submittedSnapshot.camera.target.z,
+    submittedSnapshot.light.position.x,
+    submittedSnapshot.light.position.y,
+    submittedSnapshot.light.position.z,
+    submittedSnapshot.light.target.x,
+    submittedSnapshot.light.target.y,
+    submittedSnapshot.light.target.z,
+    submittedSnapshot.light.intensity,
+  ];
+  return currentValues.some((value, index) => value !== submittedValues[index]);
 }
 
 function requestActionConfirmation(action: 'publish' | 'submit'): void {
@@ -213,6 +277,7 @@ function publishTask(): void {
 function submitAttempt(): void {
   if (role !== 'novice' || !scene || activeTaskId === null) return;
   const { camera, light } = scene.state();
+  submittedSnapshot = { camera, light };
   const taskId = activeTaskId;
   pendingSubmissionTaskId = taskId;
   setActionStatus('Submitting attempt…');
@@ -222,6 +287,7 @@ function submitAttempt(): void {
     .catch((err: unknown) => {
       console.error('attempt capture failed', err);
       pendingSubmissionTaskId = null;
+      submittedSnapshot = null;
       setActionStatus('Could not submit the attempt. Please try again.', 'error');
     });
 }
@@ -238,6 +304,14 @@ function mountScene(): void {
   scene = createScene(
     sceneMount,
     (camera, light) => {
+      if (
+        role === 'novice' &&
+        actionStatus.dataset.status === 'success' &&
+        stateChangedSinceSubmission({ camera, light })
+      ) {
+        submittedSnapshot = null;
+        setActionStatus('');
+      }
       if (socket.connected && role) {
         socket.emit('state:update', { camera, light });
       }
@@ -425,7 +499,40 @@ function taskLabelOption(task: TaskEntry): HTMLOptionElement {
 }
 
 function attemptLabel(attempt: Attempt): string {
-  return `Attempt ${attempt.id} — ${new Date(attempt.createdAt).toLocaleTimeString()}`;
+  const unread = role === 'novice' && attemptFeedback.get(attempt.id)?.unread;
+  return `Attempt ${attempt.id} — ${new Date(attempt.createdAt).toLocaleTimeString()}${unread ? ' (New feedback)' : ''}`;
+}
+
+function renderAttemptFeedback(attemptId: number | undefined, markRead = false): void {
+  const attempt = attempts.find((item) => item.id === attemptId);
+  const feedback = attemptId === undefined ? undefined : attemptFeedback.get(attemptId);
+  const showFeedback = feedback !== undefined;
+  attemptFeedbackPanel.classList.toggle('hidden', !showFeedback);
+  attemptFeedbackEditor.classList.toggle('hidden', role !== 'expert' || !attempt);
+  attemptFeedbackUnread.classList.toggle('hidden', role !== 'novice' || !feedback?.unread);
+  attemptFeedbackText.textContent = feedback?.text ?? '';
+  if (role === 'expert' && document.activeElement !== attemptFeedbackInput) {
+    attemptFeedbackInput.value = feedback?.text ?? '';
+  }
+  feedbackStatus.textContent = '';
+  sendAttemptFeedbackBtn.disabled = !attempt;
+
+  if (role === 'novice' && markRead && feedback?.unread && attemptId !== undefined && attempt) {
+    attemptFeedback.set(attemptId, { ...feedback, unread: false });
+    attemptFeedbackUnread.classList.add('hidden');
+    refreshAttemptOptionLabels(attempt.taskId);
+    refreshFeedbackNotice();
+    socket.emit('feedback:read', attemptId);
+  }
+}
+
+function refreshAttemptOptionLabels(taskId: number): void {
+  for (const attempt of attempts.filter((item) => item.taskId === taskId)) {
+    const option = Array.from(attemptSelect.options).find(
+      (item) => item.value === String(attempt.id)
+    );
+    if (option) option.textContent = attemptLabel(attempt);
+  }
 }
 
 function showAttempt(attempt: Attempt | undefined): void {
@@ -526,11 +633,13 @@ function refreshAttemptOptions(taskId: number | undefined): void {
     showAttempt(newest);
     attemptEmpty.classList.add('hidden');
     renderReview(newest.id);
+    renderAttemptFeedback(newest.id);
   } else {
     showAttempt(undefined);
     attemptSelect.value = '';
     attemptEmpty.classList.remove('hidden');
     renderReview(undefined);
+    renderAttemptFeedback(undefined);
   }
 }
 
@@ -538,8 +647,10 @@ function clearTaskUi(): void {
   tasks = [];
   attempts = [];
   reviews.clear();
+  attemptFeedback.clear();
   activeTaskId = null;
   pendingSubmissionTaskId = null;
+  submittedSnapshot = null;
   setActionStatus('');
   selectedAudioAttribute = null;
   audioFeedbackButtons.forEach((button) => button.setAttribute('aria-pressed', 'false'));
@@ -554,6 +665,7 @@ function clearTaskUi(): void {
   publishedImage.removeAttribute('src');
   attemptEmpty.classList.remove('hidden');
   attemptsPanel.classList.add('hidden');
+  feedbackNotice.classList.add('hidden');
   diffSummary.replaceChildren();
   suggestionButtons.replaceChildren();
   feedbackSuggestions.classList.add('hidden');
@@ -570,6 +682,37 @@ attemptSelect.addEventListener('change', () => {
   const attempt = attempts.find((a) => a.id === Number(attemptSelect.value));
   showAttempt(attempt);
   renderReview(attempt?.id);
+  renderAttemptFeedback(attempt?.id, true);
+});
+
+feedbackNoticeButton.addEventListener('click', () => {
+  const unread = [...attemptFeedback.values()]
+    .filter((feedback) => feedback.unread)
+    .sort((a, b) => b.createdAt - a.createdAt)[0];
+  const attempt = attempts.find((item) => item.id === unread?.attemptId);
+  if (!attempt) return;
+  taskSelect.value = String(attempt.taskId);
+  refreshAttemptOptions(attempt.taskId);
+  attemptSelect.value = String(attempt.id);
+  showAttempt(attempt);
+  renderReview(attempt.id);
+  renderAttemptFeedback(attempt.id, true);
+});
+
+sendAttemptFeedbackBtn.addEventListener('click', () => {
+  if (role !== 'expert') return;
+  const attemptId = Number(attemptSelect.value);
+  if (!Number.isSafeInteger(attemptId) || !attempts.some((item) => item.id === attemptId)) {
+    feedbackStatus.textContent = 'Select a submission before sending feedback.';
+    return;
+  }
+  const text = attemptFeedbackInput.value.trim();
+  if (!text) {
+    feedbackStatus.textContent = 'Enter feedback before sending.';
+    return;
+  }
+  feedbackStatus.textContent = 'Sending feedback…';
+  socket.emit('feedback:send', { attemptId, text });
 });
 
 workTaskSelect.addEventListener('change', () => {
@@ -673,6 +816,11 @@ socket.on('task:published', (task) => {
   refreshTasksUi(task.id);
   if (role === 'expert') {
     setActionStatus('Task published successfully.', 'success');
+    publishStatusTimeout = window.setTimeout(() => {
+      if (actionStatus.textContent === 'Task published successfully.') {
+        setActionStatus('');
+      }
+    }, 4000);
   }
 });
 
@@ -689,6 +837,41 @@ socket.on('attempt:saved', (attempt) => {
   if (Number(taskSelect.value) === attempt.taskId) {
     refreshAttemptOptions(attempt.taskId);
   }
+});
+
+socket.on('feedback:new', (feedback) => {
+  if (role !== 'novice') return;
+  attemptFeedback.set(feedback.attemptId, feedback);
+  const attempt = attempts.find((item) => item.id === feedback.attemptId);
+  if (attempt) refreshAttemptOptionLabels(attempt.taskId);
+  refreshFeedbackNotice();
+  if (Number(attemptSelect.value) === feedback.attemptId) {
+    renderAttemptFeedback(feedback.attemptId, true);
+  }
+});
+
+socket.on('feedback:current', (saved) => {
+  attemptFeedback.clear();
+  for (const feedback of saved) {
+    attemptFeedback.set(feedback.attemptId, feedback);
+  }
+  for (const task of tasks) refreshAttemptOptionLabels(task.id);
+  refreshFeedbackNotice();
+  renderAttemptFeedback(Number(attemptSelect.value) || undefined);
+});
+
+socket.on('feedback:saved', (feedback) => {
+  if (role !== 'expert') return;
+  attemptFeedback.set(feedback.attemptId, feedback);
+  if (Number(attemptSelect.value) === feedback.attemptId) {
+    renderAttemptFeedback(feedback.attemptId);
+  }
+  attemptFeedbackInput.value = '';
+  feedbackStatus.textContent = `Feedback sent for Attempt ${feedback.attemptId}.`;
+});
+
+socket.on('feedback:error', (message) => {
+  feedbackStatus.textContent = message;
 });
 
 socket.on('attempt:review', (review) => {

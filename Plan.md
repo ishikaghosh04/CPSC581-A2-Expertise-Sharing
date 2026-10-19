@@ -15,7 +15,7 @@ A 1-on-1, browser-based CAD lighting teaching demo. The object of study is *whet
 3. Expert frames the camera, moves/aims the spotlight, sets intensity → presses **Publish task**.
 4. Server renders the expert's view *offscreen with the light source hidden* → sends the reference image and retains that task's camera/light state server-side for private expert diffs and opt-in novice hints.
 5. (Undecided if will add) Novice works live: orbits their camera and manipulates their own light to make their view match the reference picture. The expert sees **both scenes side-by-side, live**, but there is **no numeric guidance** — the reference image is the only guide, and "match it by eye" is part of the task.
-6. Novice submits → expert compares the target and novice attempt, with per-task state differences visible only to the expert. Text chat works both ways; the expert also gets varied, selectable feedback suggestions from the shared comparison logic.
+6. Novice submits → expert compares the target and novice attempt, with per-task state differences visible only to the expert. The expert can send feedback attached to a submission; the novice sees an unread notice and can review it alongside the attempt. Text chat works both ways, and the expert gets varied, selectable feedback suggestions from the shared comparison logic.
 
 ## Controls (phase 1, keyboard/mouse)
 

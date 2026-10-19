@@ -320,6 +320,19 @@ input {
   margin-top: 12px;
 }
 
+.feedback-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: #86d7a4;
+}
+
 .compare-cell {
   flex: 1 1 0;
   min-width: 0;
@@ -462,6 +475,56 @@ input {
   font-size: 0.8rem;
   color: var(--muted);
   margin-bottom: 4px;
+}
+
+.attempt-feedback,
+.attempt-feedback-editor {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.attempt-feedback h3 {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+}
+
+.attempt-feedback p,
+.attempt-feedback-editor p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.attempt-feedback-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.attempt-feedback-editor label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.attempt-feedback-editor textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.feedback-unread {
+  display: inline-block;
+  margin-top: 8px;
+  color: #86d7a4;
+  font-size: 0.8rem;
+  font-weight: 700;
 }
 
 .sep {

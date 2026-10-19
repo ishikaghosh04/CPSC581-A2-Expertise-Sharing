@@ -60,6 +60,7 @@ const main = async () => {
 
   // 4. Novice submits attempt 1 and 2 for task 1.
   const saved1 = once(expert, 'attempt:saved');
+  const submissionChat1 = once(expert, 'chat:message');
   const review1 = once(expert, 'attempt:review');
   let noviceReceivedReview = false;
   novice.once('attempt:review', () => {
@@ -71,9 +72,16 @@ const main = async () => {
     image: IMAGE,
   });
   const a1 = await saved1;
+  const submissionMessage1 = await submissionChat1;
   const r1 = await review1;
   if (a1.id !== 1 || a1.taskId !== 1) {
     throw new Error(`expected attempt id 1 task 1, got id=${a1.id} taskId=${a1.taskId}`);
+  }
+  if (
+    submissionMessage1.from !== 'novice' ||
+    submissionMessage1.text !== `Submitted Attempt ${a1.id}.`
+  ) {
+    throw new Error(`unexpected submission chat message: ${JSON.stringify(submissionMessage1)}`);
   }
   if (
     r1.attemptId !== a1.id ||
@@ -88,6 +96,37 @@ const main = async () => {
     throw new Error('attempt review must not be sent to the novice');
   }
 
+  const noviceFeedback = once(novice, 'feedback:new');
+  const expertFeedback = once(expert, 'feedback:saved');
+  const expertFeedbackChat = once(expert, 'chat:message');
+  const noviceFeedbackChat = once(novice, 'chat:message');
+  expert.emit('feedback:send', {
+    attemptId: a1.id,
+    text: 'Good framing. Try reducing the brightness slightly.',
+  });
+  const [feedbackForNovice, feedbackSaved, expertChatNotice, noviceChatNotice] = await Promise.all([
+    noviceFeedback,
+    expertFeedback,
+    expertFeedbackChat,
+    noviceFeedbackChat,
+  ]);
+  if (
+    feedbackForNovice.attemptId !== a1.id ||
+    feedbackForNovice.text !== 'Good framing. Try reducing the brightness slightly.' ||
+    !feedbackForNovice.unread ||
+    feedbackSaved.attemptId !== a1.id
+  ) {
+    throw new Error(`unexpected attempt feedback: ${JSON.stringify(feedbackForNovice)}`);
+  }
+  if (
+    expertChatNotice.from !== 'expert' ||
+    expertChatNotice.text !== `Left feedback on Attempt ${a1.id}.` ||
+    JSON.stringify(noviceChatNotice) !== JSON.stringify(expertChatNotice)
+  ) {
+    throw new Error(`unexpected feedback chat announcement: ${JSON.stringify(expertChatNotice)}`);
+  }
+  novice.emit('feedback:read', a1.id);
+
   const chat = once(expert, 'chat:message');
   novice.emit('chat:message', '  Thanks for the hint!  ');
   const chatMessage = await chat;
@@ -96,14 +135,22 @@ const main = async () => {
   }
 
   const saved2 = once(expert, 'attempt:saved');
+  const submissionChat2 = once(expert, 'chat:message');
   novice.emit('attempt:submit', {
     camera: { position: { x: 1, y: 1.6, z: 3 }, target: { x: 0, y: 1, z: 0 } },
     light: { position: { x: 1, y: 2, z: 2 }, target: { x: 0, y: 1, z: 0 }, intensity: 3.5 },
     image: IMAGE,
   });
   const a2 = await saved2;
+  const submissionMessage2 = await submissionChat2;
   if (a2.id !== 2 || a2.taskId !== 1) {
     throw new Error(`expected attempt id 2 task 1, got id=${a2.id} taskId=${a2.taskId}`);
+  }
+  if (
+    submissionMessage2.from !== 'novice' ||
+    submissionMessage2.text !== `Submitted Attempt ${a2.id}.`
+  ) {
+    throw new Error(`unexpected submission chat message: ${JSON.stringify(submissionMessage2)}`);
   }
 
   // 5. Expert publishes task 2; new submissions must belong to task 2.
@@ -125,6 +172,7 @@ const main = async () => {
   }
 
   const saved3 = once(expert, 'attempt:saved');
+  const submissionChat3 = once(expert, 'chat:message');
   const review3 = once(expert, 'attempt:review');
   novice.emit('attempt:submit', {
     taskId: 1, // student switched back to working on task 1
@@ -133,7 +181,14 @@ const main = async () => {
     image: IMAGE,
   });
   const a3 = await saved3;
+  const submissionMessage3 = await submissionChat3;
   const r3 = await review3;
+  if (
+    submissionMessage3.from !== 'novice' ||
+    submissionMessage3.text !== `Submitted Attempt ${a3.id}.`
+  ) {
+    throw new Error(`unexpected submission chat message: ${JSON.stringify(submissionMessage3)}`);
+  }
   if (a3.taskId !== 1) {
     throw new Error(`expected attempt 3 to belong to task 1 (student choice), got taskId=${a3.taskId}`);
   }

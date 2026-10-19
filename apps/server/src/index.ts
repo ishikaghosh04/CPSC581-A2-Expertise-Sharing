@@ -7,6 +7,7 @@ import { Server } from 'socket.io';
 
 import type {
   Attempt,
+  AttemptFeedback,
   AttemptReview,
   AudioFeedbackAttribute,
   CameraState,
@@ -39,6 +40,7 @@ import {
 
 const PORT = Number(process.env.PORT ?? 3000);
 const MAX_CHAT_LENGTH = 500;
+const MAX_FEEDBACK_LENGTH = 1000;
 const AUDIO_FEEDBACK_ATTRIBUTES: AudioFeedbackAttribute[] = [
   'camera-position',
   'camera-aim',
@@ -130,6 +132,7 @@ io.on('connection', (socket) => {
     if (session.attempts.length > 0) {
       socket.emit('attempts:current', session.attempts);
     }
+    socket.emit('feedback:current', [...session.attemptFeedback.values()]);
     if (session.tasks.length > 0) {
       socket.emit('tasks:current', session.tasks);
     }
@@ -273,6 +276,10 @@ io.on('connection', (socket) => {
     session.phase = 'submitted';
     session.submitted = true;
     io.to(session.code).emit('attempt:saved', attempt);
+    io.to(session.code).emit('chat:message', {
+      from: 'novice',
+      text: `Submitted Attempt ${attempt.id}.`,
+    });
     io.to(session.code).emit('attempt:submitted');
     const expertId = session.members.expert;
     if (expertId) {
@@ -286,6 +293,51 @@ io.on('connection', (socket) => {
       io.to(expertId).emit('attempt:review', review);
     }
     io.to(session.code).emit('session:meta', sessionMeta(session));
+  });
+
+  socket.on('feedback:send', ({ attemptId, text }) => {
+    const session = sessionOf();
+    if (!session || role !== 'expert') {
+      socket.emit('feedback:error', 'Only the expert can send attempt feedback.');
+      return;
+    }
+    const message = typeof text === 'string' ? text.trim() : '';
+    if (
+      !Number.isSafeInteger(attemptId) ||
+      !session.attempts.some((attempt) => attempt.id === attemptId)
+    ) {
+      socket.emit('feedback:error', 'That submission is no longer available for feedback.');
+      return;
+    }
+    if (message.length === 0 || message.length > MAX_FEEDBACK_LENGTH) {
+      socket.emit('feedback:error', `Feedback must be 1-${MAX_FEEDBACK_LENGTH} characters.`);
+      return;
+    }
+    const feedback: AttemptFeedback = {
+      attemptId,
+      text: message,
+      createdAt: Date.now(),
+      unread: true,
+    };
+    session.attemptFeedback.set(attemptId, feedback);
+    const noviceId = session.members.novice;
+    if (noviceId) {
+      io.to(noviceId).emit('feedback:new', feedback);
+    }
+    socket.emit('feedback:saved', feedback);
+    io.to(session.code).emit('chat:message', {
+      from: 'expert',
+      text: `Left feedback on Attempt ${attemptId}.`,
+    });
+  });
+
+  socket.on('feedback:read', (attemptId) => {
+    const session = sessionOf();
+    if (!session || role !== 'novice' || !Number.isSafeInteger(attemptId)) return;
+    const feedback = session.attemptFeedback.get(attemptId);
+    if (feedback) {
+      session.attemptFeedback.set(attemptId, { ...feedback, unread: false });
+    }
   });
 
   socket.on('chat:message', (text) => {

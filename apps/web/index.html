@@ -123,6 +123,10 @@
 
       <section id="attempts" class="card hidden">
         <h2>Published tasks &amp; submissions</h2>
+        <div id="feedback-notice" class="feedback-notice hidden" role="status" aria-live="polite">
+          <span>New expert feedback is available.</span>
+          <button id="feedback-notice-button" type="button" class="suggestion-button"></button>
+        </div>
         <div class="compare-row">
           <figure class="compare-cell">
             <span class="compare-label">Published task</span>
@@ -134,6 +138,17 @@
             <select id="attempt-select" aria-label="Submission"></select>
             <img id="attempt-image" class="attempt-image hidden" alt="Selected attempt" />
             <span id="attempt-empty" class="muted hidden">No submissions for this task yet.</span>
+            <section id="attempt-feedback" class="attempt-feedback hidden" aria-live="polite">
+              <h3>Expert feedback</h3>
+              <p id="attempt-feedback-text"></p>
+              <span id="attempt-feedback-unread" class="feedback-unread hidden">New feedback</span>
+            </section>
+            <section id="attempt-feedback-editor" class="attempt-feedback-editor hidden">
+              <label for="attempt-feedback-input">Feedback for this submission</label>
+              <textarea id="attempt-feedback-input" maxlength="1000" rows="3"></textarea>
+              <button id="send-attempt-feedback" type="button">Send feedback</button>
+              <p id="feedback-status" class="muted" role="status"></p>
+            </section>
           </figure>
         </div>
         <section id="diff-panel" class="diff-panel hidden">

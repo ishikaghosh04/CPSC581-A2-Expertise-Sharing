@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 
 import type {
   Attempt,
+  AttemptFeedback,
   CameraState,
   LightState,
   Role,
@@ -45,6 +46,8 @@ export interface Session {
   /** All submitted attempts across tasks for this session. */
   attempts: Attempt[];
   nextAttemptId: number;
+  /** Latest expert feedback per submission. */
+  attemptFeedback: Map<number, AttemptFeedback>;
 }
 
 const sessions = new Map<string, Session>();
@@ -74,6 +77,7 @@ export function newSession(): Session {
     nextTaskId: 1,
     attempts: [],
     nextAttemptId: 1,
+    attemptFeedback: new Map(),
   };
   sessions.set(session.code, session);
   return session;
