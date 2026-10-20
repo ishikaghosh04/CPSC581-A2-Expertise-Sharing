@@ -496,6 +496,45 @@ input {
   color: var(--error);
 }
 
+.voice-meter {
+  display: grid;
+  gap: 4px;
+  padding: 8px 10px 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #11151b;
+}
+
+#voice-activity-canvas {
+  display: block;
+  width: 100%;
+  height: 44px;
+}
+
+.voice-meter-state {
+  min-height: 1.2em;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.74rem;
+  line-height: 1.35;
+}
+
+.voice-meter[data-state='listening'] {
+  border-color: rgba(124, 227, 162, 0.35);
+}
+
+.voice-meter[data-state='listening'] .voice-meter-state {
+  color: #a8e8bd;
+}
+
+.voice-meter[data-state='error'] {
+  border-color: rgba(255, 123, 123, 0.4);
+}
+
+.voice-meter[data-state='error'] .voice-meter-state {
+  color: #ffaaaa;
+}
+
 .gesture-panel {
   display: grid;
   grid-template-columns: minmax(0, 150px) minmax(0, 1fr);

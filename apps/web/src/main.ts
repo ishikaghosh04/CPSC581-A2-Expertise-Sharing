@@ -72,6 +72,9 @@ const cameraState = el<HTMLParagraphElement>('#hand-camera-state');
 const cameraPreviewToggle = el<HTMLButtonElement>('#toggle-camera-preview');
 const microphoneBtn = el<HTMLButtonElement>('#toggle-microphone');
 const microphoneState = el<HTMLParagraphElement>('#microphone-state');
+const voiceMeter = el<HTMLDivElement>('#voice-meter');
+const voiceActivityCanvas = el<HTMLCanvasElement>('#voice-activity-canvas');
+const voiceMeterState = el<HTMLParagraphElement>('#voice-meter-state');
 const voiceStatus = el<HTMLParagraphElement>('#voice-status');
 const inputTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
 const inputTabPanels = Array.from(document.querySelectorAll<HTMLElement>('[role="tabpanel"]'));
@@ -127,6 +130,7 @@ let selectedInputMode: InputMode = 'manual';
 let handController: HandGestureController | null = null;
 let voiceController: VoiceCommandController | null = null;
 let voiceRunState: VoiceRunState = 'off';
+const voiceAudioLevels = Array.from({ length: 48 }, () => 0);
 let handStarting = false;
 let cameraRunState: CameraRunState = 'off';
 let cameraStatusMessage = 'Camera off · Tracking inactive';
@@ -532,15 +536,78 @@ function setPublishButtonState(state: typeof publishButtonState): void {
 
 function setVoiceButtonState(): void {
   const active = voiceController?.isActive ?? false;
-  microphoneBtn.textContent = active ? 'Turn microphone off' : 'Turn microphone on';
+  microphoneBtn.textContent = voiceRunState === 'starting'
+    ? 'Starting microphone…'
+    : active
+      ? 'Turn microphone off'
+      : 'Turn microphone on';
+  microphoneBtn.disabled = voiceRunState === 'starting';
   microphoneBtn.setAttribute('aria-pressed', String(active));
   microphoneState.textContent = voiceRunState === 'listening'
-    ? 'Microphone on · listening'
-    : voiceRunState === 'error'
-      ? 'Microphone error'
-      : 'Microphone off';
+    ? 'Listening'
+    : voiceRunState === 'listening-unmetered'
+      ? 'Listening · level unavailable'
+      : voiceRunState === 'starting'
+        ? 'Requesting microphone access…'
+        : voiceRunState === 'error'
+          ? 'Microphone error'
+          : 'Microphone off';
   microphoneState.classList.toggle('is-active', active);
   microphoneState.classList.toggle('is-error', voiceRunState === 'error');
+  voiceStatus.classList.toggle('is-error', voiceRunState === 'error');
+  voiceMeter.dataset.state = voiceRunState;
+  voiceMeterState.textContent = voiceRunState === 'listening'
+    ? 'Listening · speak to see activity'
+    : voiceRunState === 'listening-unmetered'
+      ? 'Live audio level is unavailable in this browser.'
+      : voiceRunState === 'starting'
+        ? 'Waiting for microphone permission…'
+        : voiceRunState === 'error'
+          ? 'Microphone unavailable'
+          : 'Microphone off';
+}
+
+function drawVoiceActivity(level: number | null): void {
+  const context = voiceActivityCanvas.getContext('2d');
+  if (!context) return;
+
+  if (level === null) {
+    voiceAudioLevels.fill(0);
+  } else {
+    voiceAudioLevels.push(level);
+    voiceAudioLevels.shift();
+  }
+
+  const rect = voiceActivityCanvas.getBoundingClientRect();
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.round(rect.width * pixelRatio));
+  const height = Math.max(1, Math.round(rect.height * pixelRatio));
+  if (voiceActivityCanvas.width !== width || voiceActivityCanvas.height !== height) {
+    voiceActivityCanvas.width = width;
+    voiceActivityCanvas.height = height;
+  }
+
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, rect.width, rect.height);
+  const midY = rect.height / 2;
+  context.beginPath();
+  voiceAudioLevels.forEach((sample, index) => {
+    const x = (index / (voiceAudioLevels.length - 1)) * rect.width;
+    const amplitude = sample === 0 ? 0 : Math.min(sample * 5, 0.9) * rect.height * 0.46;
+    const y = midY - amplitude;
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.lineWidth = 2;
+  context.lineJoin = 'round';
+  context.lineCap = 'round';
+  context.strokeStyle = voiceRunState === 'listening' ? '#7ce3a2' : '#647080';
+  context.shadowColor = voiceRunState === 'listening'
+    ? 'rgba(124, 227, 162, 0.55)'
+    : 'transparent';
+  context.shadowBlur = voiceRunState === 'listening' ? 5 : 0;
+  context.stroke();
+  context.shadowBlur = 0;
 }
 
 function initializeInputControllers(): void {
@@ -571,8 +638,10 @@ function initializeInputControllers(): void {
       voiceRunState = state;
       voiceStatus.textContent = message;
       setVoiceButtonState();
+      drawVoiceActivity(state === 'listening' ? 0 : null);
     },
-    (preset) => setIntensity(preset, 'voice')
+    (preset) => setIntensity(preset, 'voice'),
+    drawVoiceActivity
   );
   handController.setPreference(handSelection.value as HandPreference);
   handController.setEnabled(selectedInputMode === 'hand');
@@ -830,6 +899,7 @@ microphoneBtn.addEventListener('click', () => {
 initializeInputControllers();
 updateHandButtons();
 setVoiceButtonState();
+drawVoiceActivity(null);
 setIntensity(selectedIntensityPreset, 'manual');
 setPublishButtonState('ready');
 

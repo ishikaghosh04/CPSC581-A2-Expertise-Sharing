@@ -124,6 +124,10 @@
                 <p class="muted">Say “low brightness,” “medium brightness,” or “high brightness.”</p>
                 <button id="toggle-microphone" type="button" aria-pressed="false">Turn microphone on</button>
                 <p id="microphone-state" class="control-state" role="status">Microphone off</p>
+                <div id="voice-meter" class="voice-meter" data-state="off">
+                  <canvas id="voice-activity-canvas" width="280" height="48" aria-hidden="true"></canvas>
+                  <p id="voice-meter-state" class="voice-meter-state">Microphone off</p>
+                </div>
                 <p id="voice-status" class="control-state" role="status" aria-live="polite">Microphone is off.</p>
               </section>
           </aside>
