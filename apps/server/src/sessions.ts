@@ -2,6 +2,7 @@ import { randomInt } from 'node:crypto';
 
 import type {
   Attempt,
+  AttemptFeedback,
   CameraState,
   LightState,
   Role,
@@ -34,8 +35,8 @@ export interface Session {
   members: Partial<Record<Role, string>>;
   /** Live state per role, streamed with `state:update`. */
   live: Partial<Record<Role, LiveState>>;
-  /** The expert's published target state (active task). Kept server-side (future hints/diff). */
-  target: TaskTarget | null;
+  /** Target states stay server-side and remain available for prior task attempts. */
+  taskTargets: Map<number, TaskTarget>;
   /** Data URL of the reference render for the active task. */
   referenceImage: string | null;
   /** Published task history — cleaned of attempts but never wiped per publish. */
@@ -45,6 +46,8 @@ export interface Session {
   /** All submitted attempts across tasks for this session. */
   attempts: Attempt[];
   nextAttemptId: number;
+  /** Latest expert feedback per submission. */
+  attemptFeedback: Map<number, AttemptFeedback>;
 }
 
 const sessions = new Map<string, Session>();
@@ -67,13 +70,14 @@ export function newSession(): Session {
     submitted: false,
     members: {},
     live: {},
-    target: null,
+    taskTargets: new Map(),
     referenceImage: null,
     tasks: [],
     currentTaskId: null,
     nextTaskId: 1,
     attempts: [],
     nextAttemptId: 1,
+    attemptFeedback: new Map(),
   };
   sessions.set(session.code, session);
   return session;
@@ -111,7 +115,7 @@ export function releaseMember(session: Session, socketId: string): void {
 }
 
 export function dropIfEmpty(session: Session): boolean {
-  if (session.members.expert || session.members.novice) return false;
+  if (session.members.expert && session.members.novice) return false;
   sessions.delete(session.code);
   return true;
 }

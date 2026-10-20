@@ -65,18 +65,68 @@
             <button id="publish-btn" class="hidden primary">Publish task</button>
             <button id="submit-btn" class="hidden primary">Submit attempt</button>
           </div>
+          <p id="action-status" class="action-status muted" role="status" aria-live="polite"></p>
           <div class="toolbar intensity-row">
             <span class="muted">Intensity</span>
             <label><input type="radio" name="intensity" value="low" />Low</label>
             <label><input type="radio" name="intensity" value="medium" checked />Med</label>
             <label><input type="radio" name="intensity" value="high" />High</label>
           </div>
-          <p class="muted chat-hint">Chat panel arrives in build step 5.</p>
+          <section id="hint-panel" class="feedback-panel hidden">
+            <div class="hint-controls">
+              <button id="request-hint" type="button">Get a hint</button>
+              <p id="hint-text" class="muted" role="status">Hints are optional.</p>
+            </div>
+            <div class="audio-feedback">
+              <span class="muted">Audio progress feedback — choose one attribute</span>
+              <div class="audio-feedback-buttons" role="group" aria-label="Audio feedback attribute">
+                <button class="audio-feedback-button" type="button" data-audio-attribute="camera-position" aria-pressed="false">Camera position</button>
+                <button class="audio-feedback-button" type="button" data-audio-attribute="camera-aim" aria-pressed="false">Camera aim</button>
+                <button class="audio-feedback-button" type="button" data-audio-attribute="light-position" aria-pressed="false">Light position</button>
+                <button class="audio-feedback-button" type="button" data-audio-attribute="light-aim" aria-pressed="false">Light aim</button>
+                <button class="audio-feedback-button" type="button" data-audio-attribute="intensity" aria-pressed="false">Brightness</button>
+              </div>
+              <p id="audio-feedback-status" class="muted" role="status" aria-live="polite">Select an attribute to hear when it gets closer to the target.</p>
+            </div>
+          </section>
+          <section id="chat-panel" class="chat-panel">
+            <h2>Session chat</h2>
+            <div id="chat-messages" class="chat-messages" role="log" aria-live="polite"></div>
+            <div id="feedback-suggestions" class="feedback-suggestions hidden">
+              <span class="muted">Suggested feedback</span>
+              <div id="suggestion-buttons" class="suggestion-buttons"></div>
+            </div>
+            <form id="chat-form" class="chat-form">
+              <input
+                id="chat-input"
+                type="text"
+                maxlength="500"
+                autocomplete="off"
+                aria-label="Chat message"
+                placeholder="Write a message…"
+              />
+              <button type="submit">Send</button>
+            </form>
+            <p id="chat-error" class="error" role="status"></p>
+          </section>
         </section>
       </section>
 
+      <dialog id="action-confirm-dialog" class="action-confirm-dialog" aria-labelledby="action-confirm-title" aria-describedby="action-confirm-message">
+        <h2 id="action-confirm-title"></h2>
+        <p id="action-confirm-message" class="muted"></p>
+        <form method="dialog" class="action-confirm-buttons">
+          <button type="submit" value="cancel" class="action-confirm-cancel">Cancel</button>
+          <button id="action-confirm-button" type="submit" value="confirm" class="primary"></button>
+        </form>
+      </dialog>
+
       <section id="attempts" class="card hidden">
         <h2>Published tasks &amp; submissions</h2>
+        <div id="feedback-notice" class="feedback-notice hidden" role="status" aria-live="polite">
+          <span>New expert feedback is available.</span>
+          <button id="feedback-notice-button" type="button" class="suggestion-button"></button>
+        </div>
         <div class="compare-row">
           <figure class="compare-cell">
             <span class="compare-label">Published task</span>
@@ -88,8 +138,23 @@
             <select id="attempt-select" aria-label="Submission"></select>
             <img id="attempt-image" class="attempt-image hidden" alt="Selected attempt" />
             <span id="attempt-empty" class="muted hidden">No submissions for this task yet.</span>
+            <section id="attempt-feedback" class="attempt-feedback hidden" aria-live="polite">
+              <h3>Expert feedback</h3>
+              <p id="attempt-feedback-text"></p>
+              <span id="attempt-feedback-unread" class="feedback-unread hidden">New feedback</span>
+            </section>
+            <section id="attempt-feedback-editor" class="attempt-feedback-editor hidden">
+              <label for="attempt-feedback-input">Feedback for this submission</label>
+              <textarea id="attempt-feedback-input" maxlength="1000" rows="3"></textarea>
+              <button id="send-attempt-feedback" type="button">Send feedback</button>
+              <p id="feedback-status" class="muted" role="status"></p>
+            </section>
           </figure>
         </div>
+        <section id="diff-panel" class="diff-panel hidden">
+          <h3>Setup differences (expert only)</h3>
+          <ul id="diff-summary"></ul>
+        </section>
       </section>
     </main>
   </body>
