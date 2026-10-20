@@ -35,6 +35,7 @@ export interface SceneHandle {
   captureReference(): Promise<string>;
   setIntensityPreset(preset: IntensityPreset): void;
   setHandle(handle: LightHandle): void;
+  setHeadOffset(x: number, y: number): void;
   resetCamera(): void;
   resetLight(): void;
   dispose(): void;
@@ -155,6 +156,13 @@ export function createScene(
   orbit.enableDamping = true;
   orbit.dampingFactor = 0.08;
   orbit.target.set(DEFAULT_CAMERA.target.x, DEFAULT_CAMERA.target.y, DEFAULT_CAMERA.target.z);
+  // Head tracking controls
+  let headOffset = { x: 0, y: 0 };
+
+  const setHeadOffset = (x: number, y: number): void => {
+    headOffset.x = THREE.MathUtils.clamp(x, -1, 1);
+    headOffset.y = THREE.MathUtils.clamp(y, -1, 1);
+  };
 
   // --- Gizmo -----------------------------------------------------------
   const transform = new TransformControls(camera, renderer.domElement);
@@ -233,10 +241,30 @@ export function createScene(
   let frame = 0;
   const animate = (): void => {
     frame = requestAnimationFrame(animate);
+
     orbit.update();
+  
+    // Apply temporary head movement relative to the normal camera.
+    // Restore the camera afterward so OrbitControls remains independent.
+    const basePosition = camera.position.clone();
+    const baseQuaternion = camera.quaternion.clone();
+
+    const right = new THREE.Vector3(1, 0, 0)
+      .applyQuaternion(baseQuaternion);
+    const up = new THREE.Vector3(0, 1, 0)
+      .applyQuaternion(baseQuaternion);
+
+    camera.position.addScaledVector(right, headOffset.x * 0.7);
+    camera.position.addScaledVector(up, -headOffset.y * 0.5);
+    camera.lookAt(orbit.target);
+
     bulb.position.copy(spot.position);
     beam.geometry.setFromPoints([bulb.position, aimMarker.position]);
+
     renderer.render(scene, camera);
+
+    camera.position.copy(basePosition);
+    camera.quaternion.copy(baseQuaternion);
   };
   animate();
 
@@ -313,6 +341,7 @@ export function createScene(
   return {
     state,
     captureReference,
+    setHeadOffset,
     setIntensityPreset,
     setHandle,
     resetCamera,

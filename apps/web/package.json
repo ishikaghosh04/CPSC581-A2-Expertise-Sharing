@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.1.1",
     "socket.io-client": "^4.8.4",
     "three": "^0.186.1"
   },
