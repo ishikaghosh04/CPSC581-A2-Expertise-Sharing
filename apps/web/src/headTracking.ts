@@ -38,7 +38,7 @@ export function createHeadTracker(
       await video.play();
 
       const vision = await FilesetResolver.forVisionTasks(
-        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm'
+        '/mediapipe/wasm'
       );
 
       landmarker = await FaceLandmarker.createFromOptions(vision, {
