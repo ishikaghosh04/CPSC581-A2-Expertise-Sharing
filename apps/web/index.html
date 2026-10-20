@@ -10,25 +10,46 @@
   <body>
     <main class="wrap">
       <section id="landing" class="card">
-        <h1>Lighting Teacher</h1>
-        <p class="muted">
-          CPSC 581 A2 expertise-sharing prototype. The expert frames a camera and
-          lights a scene; the novice tries to replicate it from a reference image.
-        </p>
-        <div class="row">
-          <button id="create-btn" class="primary">Create session (expert)</button>
+        <div class="landing-brand">
+          <span class="eyebrow">EXPERTISE SHARING STUDIO</span>
+          <h1>Lighting Teacher</h1>
+          <p class="muted">
+            Work together to shape a 3D lighting setup. The expert publishes a
+            reference; the novice recreates it in the same studio.
+          </p>
         </div>
-        <div class="row">
-          <input
-            id="join-code"
-            maxlength="5"
-            placeholder="CODE"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <button id="join-btn">Join as novice</button>
+        <ol class="walkthrough landing-walkthrough" aria-label="How the session works">
+          <li><span class="walkthrough-number">1</span><span><strong>Choose a role</strong><small>Set up a task or recreate one.</small></span></li>
+          <li><span class="walkthrough-number">2</span><span><strong>Create or join</strong><small>Share a five-character session code.</small></span></li>
+          <li><span class="walkthrough-number">3</span><span><strong>Light the scene</strong><small>Use manual, hand, or voice brightness controls.</small></span></li>
+        </ol>
+        <div class="role-choice-grid">
+          <section class="role-choice">
+            <span class="eyebrow">EXPERT</span>
+            <h2>Set the lighting</h2>
+            <p class="muted">Arrange the light and publish a reference for your partner.</p>
+            <button id="create-btn" class="primary" type="button">Create expert session</button>
+          </section>
+          <section class="role-choice">
+            <span class="eyebrow">NOVICE</span>
+            <h2>Recreate a setup</h2>
+            <p class="muted">Join your expert using their session code.</p>
+            <label for="join-code">5-character session code</label>
+            <div class="join-row">
+              <input
+                id="join-code"
+                maxlength="5"
+                placeholder="ABCDE"
+                autocomplete="off"
+                spellcheck="false"
+                aria-describedby="landing-error"
+              />
+              <button id="join-btn" type="button">Join session</button>
+            </div>
+          </section>
         </div>
-        <p id="landing-error" class="error"></p>
+        <p id="landing-connection-status" class="landing-connection-status" role="status" aria-live="polite">Connecting to the session server…</p>
+        <p id="landing-error" class="error" role="status" aria-live="polite"></p>
       </section>
 
       <section id="app" class="card hidden">
@@ -45,20 +66,28 @@
         <section id="viewport" class="hidden">
           <div class="studio-layout">
             <section class="studio-workspace" aria-label="3D lighting workspace">
+              <div class="area-heading">
+                <div><span class="eyebrow">YOUR WORKSPACE</span><h2>Lighting scene</h2></div>
+                <span class="live-indicator"><span aria-hidden="true"></span>Live</span>
+              </div>
               <div id="work-task-row" class="work-task-row hidden">
                 <span class="muted">Working on</span>
                 <select id="work-task" aria-label="Task to work on"></select>
               </div>
               <div id="scene-mount"></div>
-              <div class="toolbar scene-toolbar" aria-label="Scene controls">
+              <div class="toolbar scene-toolbar" role="group" aria-label="Scene controls">
                 <button id="toggle-move" type="button">Move light</button>
                 <button id="toggle-aim" type="button">Aim light</button>
                 <button id="reset-camera" type="button">Reset camera</button>
                 <button id="reset-light" type="button">Reset light</button>
               </div>
+              <p class="scene-help">Drag the scene to orbit and scroll to zoom. Choose Move or Aim to adjust the light.</p>
             </section>
 
             <section class="studio-reference" aria-label="Reference preview and session action">
+              <div class="area-heading">
+                <div><span class="eyebrow">COMPARE</span><h2>Reference</h2></div>
+              </div>
               <section id="preview" class="reference-frame hidden">
                 <canvas id="preview-canvas" width="320" height="180"></canvas>
                 <span class="preview-label">Reference preview (no helpers)</span>
@@ -72,7 +101,9 @@
             </section>
 
             <aside class="studio-controls" aria-label="Lighting input">
-              <h2>Lighting input</h2>
+              <div class="area-heading input-heading">
+                <div><span class="eyebrow">STEP 2</span><h2>Choose an input</h2></div>
+              </div>
               <p id="selected-intensity" class="current-brightness" role="status" aria-live="polite">Current brightness: Medium</p>
               <div class="input-tabs" role="tablist" aria-label="Brightness input method">
                 <button id="tab-manual" class="input-tab" type="button" role="tab" aria-selected="true" aria-controls="panel-manual" tabindex="0">Mouse &amp; keyboard</button>
@@ -80,7 +111,7 @@
                 <button id="tab-voice" class="input-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-voice" tabindex="-1">Voice</button>
               </div>
               <section id="panel-manual" class="tab-panel" role="tabpanel" aria-labelledby="tab-manual">
-                <h3>Set brightness</h3>
+                <div class="input-panel-heading"><span class="method-icon" aria-hidden="true">⌖</span><div><h3>Mouse &amp; keyboard</h3><p>Choose a level directly or use a shortcut.</p></div></div>
                 <div class="intensity-row" role="group" aria-label="Light intensity">
                   <button type="button" class="intensity-button" data-intensity="low" aria-pressed="false">Low</button>
                   <button type="button" class="intensity-button" data-intensity="medium" aria-pressed="true">Medium</button>
@@ -89,8 +120,7 @@
                 <span class="keyboard-hint">Shortcuts: 1 = Low · 2 = Medium · 3 = High</span>
               </section>
                 <section id="panel-hand" class="tab-panel" role="tabpanel" aria-labelledby="tab-hand" hidden>
-                  <h3>Hand gestures</h3>
-                  <p class="muted">Hold 1, 2, or 3 fingers to select brightness.</p>
+                  <div class="input-panel-heading"><span class="method-icon" aria-hidden="true">✋</span><div><h3>Hand gestures</h3><p>Hold 1, 2, or 3 fingers to set brightness.</p></div></div>
                   <div id="gesture-panel" class="gesture-panel">
                   <div class="gesture-camera">
                     <div id="hand-video-frame" class="hand-video-frame">
@@ -100,7 +130,7 @@
                     <button id="toggle-camera-preview" class="preview-toggle" type="button" aria-expanded="true" aria-controls="hand-video-frame">Hide preview</button>
                   </div>
                   <div class="gesture-details">
-                    <p id="hand-status" class="input-status" role="status" aria-live="polite">No hand detected.</p>
+                    <p id="hand-status" class="input-status" role="status" aria-live="polite"></p>
                     <p id="gesture-count-indicator" class="gesture-count-indicator" aria-live="polite">No fingers detected</p>
                     <progress id="gesture-hold-progress" class="gesture-progress" max="700" value="0" aria-label="Gesture hold progress"></progress>
                     <span id="gesture-progress-label" class="gesture-progress-label">Hold a gesture steady to select.</span>
@@ -120,11 +150,13 @@
                 </div>
               </section>
               <section id="panel-voice" class="tab-panel" role="tabpanel" aria-labelledby="tab-voice" hidden>
-                <h3>Voice commands</h3>
-                <p class="muted">Say “low brightness,” “medium brightness,” or “high brightness.”</p>
-                <button id="toggle-microphone" type="button" aria-pressed="false">Turn microphone on</button>
+                <div class="input-panel-heading"><span class="method-icon" aria-hidden="true">◖</span><div><h3>Voice commands</h3><p>Say one of the supported brightness phrases.</p></div></div>
+                <div class="voice-phrases" aria-label="Supported voice commands">
+                  <span>“Low brightness”</span><span>“Medium brightness”</span><span>“High brightness”</span>
+                </div>
+                <button id="toggle-microphone" class="microphone-button" type="button" aria-pressed="false">Turn microphone on</button>
                 <p id="microphone-state" class="control-state" role="status">Microphone off</p>
-                <p id="voice-status" class="control-state" role="status" aria-live="polite">Microphone is off.</p>
+                <p id="voice-status" class="voice-feedback" role="status" aria-live="polite">Microphone is off.</p>
               </section>
           </aside>
           <section id="hint-panel" class="feedback-panel hidden">

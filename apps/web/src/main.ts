@@ -38,7 +38,10 @@ function el<T extends HTMLElement>(sel: string): T {
 const landing = el<HTMLDivElement>('#landing');
 const appView = el<HTMLDivElement>('#app');
 const landingError = el<HTMLParagraphElement>('#landing-error');
+const landingConnectionStatus = el<HTMLParagraphElement>('#landing-connection-status');
 const codeInput = el<HTMLInputElement>('#join-code');
+const createSessionBtn = el<HTMLButtonElement>('#create-btn');
+const joinSessionBtn = el<HTMLButtonElement>('#join-btn');
 const sessionCode = el<HTMLSpanElement>('#session-code');
 const roleTag = el<HTMLSpanElement>('#role-tag');
 const connectionState = el<HTMLSpanElement>('#connection-state');
@@ -118,6 +121,8 @@ const diffPanel = el<HTMLElement>('#diff-panel');
 const diffSummary = el<HTMLUListElement>('#diff-summary');
 
 let role: Role | null = null;
+let sessionEntryPending = false;
+let sessionEntryRequestId = 0;
 let phase: SessionMeta['phase'] = 'lobby';
 let lastMeta: SessionMeta | null = null;
 let scene: SceneHandle | null = null;
@@ -541,6 +546,7 @@ function setVoiceButtonState(): void {
       : 'Microphone off';
   microphoneState.classList.toggle('is-active', active);
   microphoneState.classList.toggle('is-error', voiceRunState === 'error');
+  voiceStatus.classList.toggle('is-error', voiceRunState === 'error');
 }
 
 function initializeInputControllers(): void {
@@ -689,9 +695,29 @@ function renderMeta(meta: SessionMeta): void {
 
 // --- Landing actions --------------------------------------------------------
 
-el<HTMLButtonElement>('#create-btn').addEventListener('click', () => {
+function setSessionEntryPending(pending: boolean, action: 'create' | 'join' | null = null): void {
+  sessionEntryPending = pending;
+  const disabled = pending || !socket.connected;
+  createSessionBtn.disabled = disabled;
+  joinSessionBtn.disabled = disabled;
+  codeInput.disabled = disabled;
+  createSessionBtn.textContent = pending && action === 'create'
+    ? 'Creating session…'
+    : 'Create expert session';
+  joinSessionBtn.textContent = pending && action === 'join'
+    ? 'Joining…'
+    : 'Join session';
+  landing.setAttribute('aria-busy', String(pending));
+}
+
+createSessionBtn.addEventListener('click', () => {
+  if (sessionEntryPending || !socket.connected) return;
   landingError.textContent = '';
+  const requestId = ++sessionEntryRequestId;
+  setSessionEntryPending(true, 'create');
   socket.emit('session:create', (meta) => {
+    if (requestId !== sessionEntryRequestId) return;
+    setSessionEntryPending(false);
     role = 'expert';
     showApp();
     renderMeta(meta);
@@ -699,23 +725,29 @@ el<HTMLButtonElement>('#create-btn').addEventListener('click', () => {
 });
 
 function joinSession(): void {
+  if (sessionEntryPending || !socket.connected) return;
   const code = codeInput.value.trim().toUpperCase();
   if (code.length !== CODE_LENGTH) {
     landingError.textContent = 'Enter a 5-character session code.';
     return;
   }
+  const requestId = ++sessionEntryRequestId;
+  setSessionEntryPending(true, 'join');
   socket.emit('session:join', code, (result) => {
+    if (requestId !== sessionEntryRequestId) return;
     if (!result.ok || !result.role || !result.meta) {
+      setSessionEntryPending(false);
       landingError.textContent = result.error ?? 'Could not join session.';
       return;
     }
+    setSessionEntryPending(false);
     role = result.role;
     showApp();
     renderMeta(result.meta);
   });
 }
 
-el<HTMLButtonElement>('#join-btn').addEventListener('click', joinSession);
+joinSessionBtn.addEventListener('click', joinSession);
 codeInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') joinSession();
 });
@@ -832,6 +864,11 @@ updateHandButtons();
 setVoiceButtonState();
 setIntensity(selectedIntensityPreset, 'manual');
 setPublishButtonState('ready');
+if (socket.connected) {
+  landingConnectionStatus.textContent = 'Connected to the session server. Choose a role to continue.';
+  landingConnectionStatus.classList.add('is-connected');
+}
+setSessionEntryPending(false);
 
 publishBtn.addEventListener('click', () => {
   if (role !== 'expert' || !scene) return;
@@ -1156,10 +1193,17 @@ leaveBtn.addEventListener('click', () => {
 
 socket.on('connect', () => {
   connectionState.textContent = 'connected';
+  landingConnectionStatus.textContent = 'Connected to the session server. Choose a role to continue.';
+  landingConnectionStatus.classList.add('is-connected');
+  setSessionEntryPending(false);
 });
 
 socket.on('disconnect', () => {
   connectionState.textContent = 'disconnected — reconnecting…';
+  landingConnectionStatus.textContent = 'Session server disconnected. Reconnecting…';
+  landingConnectionStatus.classList.remove('is-connected');
+  ++sessionEntryRequestId;
+  setSessionEntryPending(false);
 });
 
 socket.on('session:meta', (meta) => {
