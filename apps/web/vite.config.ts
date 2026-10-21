@@ -3,9 +3,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   server: {
-    allowedHosts: [
-      'suburban-fact-lucky-marie.trycloudflare.com',
-    ],
+    allowedHosts: ['.trycloudflare.com'],
     proxy: {
       // Development only: the dev-server proxies Socket.IO to the backend.
       '/socket.io': { target: 'http://localhost:3000', ws: true },
