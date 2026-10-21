@@ -95,7 +95,7 @@ export function createScene(
   renderer.domElement.style.width = '100%';
   renderer.domElement.style.height = '100%';
   renderer.domElement.style.display = 'block';
-  container.replaceChildren(renderer.domElement);
+  container.prepend(renderer.domElement);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x0e0e12);
@@ -267,14 +267,17 @@ export function createScene(
   };
 
   // --- Lifecycle -------------------------------------------------------
-  const resizeObserver = new ResizeObserver(() => {
-    const w = container.clientWidth;
+  const resizeScene = (): void => {
+    const w = Math.max(container.clientWidth, 1);
     const h = Math.max(container.clientHeight, 1);
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
     renderer.setSize(w, h, false);
-  });
+  };
+  const resizeObserver = new ResizeObserver(resizeScene);
   resizeObserver.observe(container);
+  window.addEventListener('resize', resizeScene);
+  resizeScene();
 
   let frame = 0;
   const animate = (): void => {
@@ -338,6 +341,11 @@ export function createScene(
     for (const helper of previewHelpers) helper.visible = true;
   };
 
+  const previewResizeObserver = previewRenderer && previewCanvas
+    ? new ResizeObserver(renderPreview)
+    : null;
+  if (previewResizeObserver && previewCanvas) previewResizeObserver.observe(previewCanvas);
+
   const previewInterval = previewRenderer
     ? window.setInterval(renderPreview, 500)
     : null;
@@ -390,6 +398,8 @@ export function createScene(
       if (previewInterval !== null) window.clearInterval(previewInterval);
       if (frame) cancelAnimationFrame(frame);
       resizeObserver.disconnect();
+      window.removeEventListener('resize', resizeScene);
+      previewResizeObserver?.disconnect();
       transform.dispose();
       orbit.dispose();
       renderer.dispose();

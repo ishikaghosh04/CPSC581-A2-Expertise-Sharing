@@ -17,6 +17,13 @@ import type {
 } from '@expertise-sharing/shared';
 
 import { createScene, type LightHandle, type SceneHandle } from './scene.js';
+import {
+  HandGestureController,
+  type CameraRunState,
+  type FingertipPosition,
+  type HandPreference,
+} from './inputs/hand-tracking.js';
+import { VoiceCommandController, type VoiceRunState } from './inputs/voice-commands.js';
 import { createHeadTracker } from './headTracking.js';
 
 const CODE_LENGTH = 5;
@@ -47,6 +54,32 @@ const toggleAimBtn = el<HTMLButtonElement>('#toggle-aim');
 const resetCameraBtn = el<HTMLButtonElement>('#reset-camera');
 const resetLightBtn = el<HTMLButtonElement>('#reset-light');
 const headTrackingBtn = el<HTMLButtonElement>('#toggle-head-tracking');
+const selectedIntensity = el<HTMLParagraphElement>('#selected-intensity');
+const intensityButtons = Array.from(
+  document.querySelectorAll<HTMLButtonElement>('[data-intensity]')
+);
+const startCameraBtn = el<HTMLButtonElement>('#start-camera');
+const stopCameraBtn = el<HTMLButtonElement>('#stop-camera');
+const handSelection = el<HTMLSelectElement>('#hand-selection');
+const handCamera = el<HTMLVideoElement>('#hand-camera');
+const handVideoFrame = el<HTMLDivElement>('#hand-video-frame');
+const fingertipOverlay = el<HTMLCanvasElement>('#hand-fingertip-overlay');
+const handStatus = el<HTMLParagraphElement>('#hand-status');
+const gesturePanel = el<HTMLElement>('#gesture-panel');
+const gestureCamera = el<HTMLDivElement>('.gesture-camera');
+const gestureProgress = el<HTMLProgressElement>('#gesture-hold-progress');
+const gestureProgressLabel = el<HTMLSpanElement>('#gesture-progress-label');
+const gestureCountIndicator = el<HTMLParagraphElement>('#gesture-count-indicator');
+const cameraState = el<HTMLParagraphElement>('#hand-camera-state');
+const cameraPreviewToggle = el<HTMLButtonElement>('#toggle-camera-preview');
+const microphoneBtn = el<HTMLButtonElement>('#toggle-microphone');
+const microphoneState = el<HTMLParagraphElement>('#microphone-state');
+const voiceMeter = el<HTMLDivElement>('#voice-meter');
+const voiceActivityCanvas = el<HTMLCanvasElement>('#voice-activity-canvas');
+const voiceMeterState = el<HTMLParagraphElement>('#voice-meter-state');
+const voiceStatus = el<HTMLParagraphElement>('#voice-status');
+const inputTabs = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+const inputTabPanels = Array.from(document.querySelectorAll<HTMLElement>('[role="tabpanel"]'));
 const previewPanel = el<HTMLElement>('#preview');
 const previewCanvas = el<HTMLCanvasElement>('#preview-canvas');
 const publishBtn = el<HTMLButtonElement>('#publish-btn');
@@ -93,6 +126,18 @@ let role: Role | null = null;
 let phase: SessionMeta['phase'] = 'lobby';
 let lastMeta: SessionMeta | null = null;
 let scene: SceneHandle | null = null;
+let selectedIntensityPreset: IntensityPreset = 'medium';
+type InputMode = 'manual' | 'hand' | 'voice';
+let selectedInputMode: InputMode = 'manual';
+let handController: HandGestureController | null = null;
+let voiceController: VoiceCommandController | null = null;
+let voiceRunState: VoiceRunState = 'off';
+const voiceAudioLevels = Array.from({ length: 48 }, () => 0);
+let handStarting = false;
+let cameraRunState: CameraRunState = 'off';
+let cameraStatusMessage = 'Camera off · Tracking inactive';
+let previewMinimized = false;
+let lastFingertips: FingertipPosition[] = [];
 
 socket.on('phone:orientation', ({ targetRole, x, y, z }) => {
   if (role !== targetRole || !scene) return;
@@ -102,7 +147,6 @@ socket.on('phone:orientation', ({ targetRole, x, y, z }) => {
 const headTracker = createHeadTracker(({ x, y }) => {
   scene?.setHeadOffset(x, y);
 });
-
 let headTrackingEnabled = false;
 let activeHandle: LightHandle = 'bulb';
 let tasks: TaskEntry[] = [];
@@ -119,6 +163,7 @@ let pendingSubmissionTaskId: number | null = null;
 let pendingConfirmedAction: 'publish' | 'submit' | null = null;
 let submittedSnapshot: StateSnapshot | null = null;
 let publishStatusTimeout: number | null = null;
+let publishButtonState: 'ready' | 'publishing' | 'published' | 'error' = 'ready';
 
 const AUDIO_FEEDBACK_ATTRIBUTES: Array<{ value: AudioFeedbackAttribute; label: string }> = [
   { value: 'camera-position', label: 'Camera position' },
@@ -274,6 +319,7 @@ function requestActionConfirmation(action: 'publish' | 'submit'): void {
 
 function publishTask(): void {
   if (role !== 'expert' || !scene) return;
+  setPublishButtonState('publishing');
   setActionStatus('Publishing task…');
   scene
     .captureReference()
@@ -283,6 +329,7 @@ function publishTask(): void {
     })
     .catch((err: unknown) => {
       console.error('reference capture failed', err);
+      setPublishButtonState('error');
       setActionStatus('Could not publish the task. Please try again.', 'error');
     });
 }
@@ -333,6 +380,317 @@ function mountScene(): void {
     // visibility is managed by updateSideView.
     role === 'expert' ? previewCanvas : undefined
   );
+  scene.setIntensityPreset(selectedIntensityPreset);
+}
+
+function setIntensity(preset: IntensityPreset, source: InputMode): void {
+  if (source !== selectedInputMode) return;
+  selectedIntensityPreset = preset;
+  scene?.setIntensityPreset(preset);
+  for (const button of intensityButtons) {
+    const selected = button.dataset.intensity === preset;
+    button.setAttribute('aria-pressed', String(selected));
+  }
+  selectedIntensity.textContent =
+    `Current brightness: ${preset.charAt(0).toUpperCase()}${preset.slice(1)}`;
+}
+
+function isTypingTarget(target: EventTarget | null): boolean {
+  return target instanceof HTMLElement
+    && (target.isContentEditable || target.matches('input, textarea, select'));
+}
+
+function drawFingertipDots(points: FingertipPosition[]): void {
+  const context = fingertipOverlay.getContext('2d');
+  if (!context) return;
+
+  const { width, height } = handVideoFrame.getBoundingClientRect();
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  fingertipOverlay.width = Math.round(width * pixelRatio);
+  fingertipOverlay.height = Math.round(height * pixelRatio);
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, width, height);
+
+  const videoWidth = handCamera.videoWidth;
+  const videoHeight = handCamera.videoHeight;
+  if (width === 0 || height === 0 || videoWidth === 0 || videoHeight === 0) return;
+
+  const coverScale = Math.max(width / videoWidth, height / videoHeight);
+  const renderedWidth = videoWidth * coverScale;
+  const renderedHeight = videoHeight * coverScale;
+  const cropX = (renderedWidth - width) / 2;
+  const cropY = (renderedHeight - height) / 2;
+  const radius = Math.max(5, Math.min(width, height) * 0.045);
+
+  for (const point of points) {
+    // The video is mirrored in CSS; mirror the landmark's x coordinate in the overlay too.
+    const sourceX = point.x * renderedWidth - cropX;
+    const x = width - sourceX;
+    const y = point.y * renderedHeight - cropY;
+    if (x < -radius || x > width + radius || y < -radius || y > height + radius) continue;
+
+    context.beginPath();
+    context.arc(x, y, radius, 0, Math.PI * 2);
+    context.fillStyle = '#8fffc2';
+    context.fill();
+    context.lineWidth = 2;
+    context.strokeStyle = '#10131a';
+    context.stroke();
+    context.beginPath();
+    context.arc(x, y, radius + 2, 0, Math.PI * 2);
+    context.lineWidth = 1.5;
+    context.strokeStyle = '#f7fff9';
+    context.stroke();
+  }
+}
+
+function updateHandButtons(): void {
+  const cameraIsOn = cameraRunState === 'running';
+  startCameraBtn.disabled = cameraIsOn || cameraRunState === 'starting' || handStarting;
+  stopCameraBtn.disabled = !cameraIsOn && cameraRunState !== 'starting' && !handStarting;
+  startCameraBtn.textContent = cameraIsOn
+    ? '✓ Camera running'
+    : cameraRunState === 'starting' || handStarting
+      ? 'Starting camera…'
+      : 'Start camera';
+  startCameraBtn.dataset.state = cameraIsOn ? 'running' : 'idle';
+  gestureCamera.hidden = !cameraIsOn;
+  gesturePanel.classList.toggle('camera-off', !cameraIsOn);
+  cameraPreviewToggle.hidden = !cameraIsOn;
+  cameraPreviewToggle.setAttribute('aria-expanded', String(!previewMinimized));
+  cameraPreviewToggle.textContent = previewMinimized ? 'Show preview' : 'Hide preview';
+  handVideoFrame.hidden = previewMinimized || !cameraIsOn;
+  handCamera.classList.toggle('hidden', !cameraIsOn);
+  fingertipOverlay.classList.toggle('hidden', !cameraIsOn);
+  cameraState.textContent = cameraRunState === 'running'
+    ? selectedInputMode === 'hand' ? cameraStatusMessage : 'Camera on · Gesture control paused'
+    : cameraRunState === 'starting' || handStarting
+      ? 'Starting camera…'
+      : cameraRunState === 'error'
+        ? 'Camera off · Tracking inactive'
+        : 'Camera off · Tracking inactive';
+  cameraState.classList.toggle('is-active', cameraIsOn);
+  cameraState.classList.toggle('is-error', cameraRunState === 'error');
+  if (!cameraIsOn) {
+    lastFingertips = [];
+    gestureCountIndicator.textContent = '';
+    gestureProgress.value = 0;
+    gestureProgressLabel.textContent = cameraRunState === 'starting' || handStarting
+      ? 'Waiting for camera access…'
+      : 'Start the camera to enable tracking.';
+    if (cameraRunState !== 'error') handStatus.textContent = '';
+  } else if (selectedInputMode !== 'hand') {
+    lastFingertips = [];
+    gestureCountIndicator.textContent = 'Tracking paused';
+    gestureProgress.value = 0;
+    gestureProgressLabel.textContent = 'Return to Hand gestures to resume.';
+    handStatus.textContent = '';
+  }
+  drawFingertipDots(lastFingertips);
+}
+
+function renderGestureFeedback(
+  hand: 'Left' | 'Right' | null,
+  fingers: number,
+  fingertips: FingertipPosition[],
+  hold: number,
+  applied: boolean,
+  state: 'none' | 'unsupported' | 'supported'
+): void {
+  if (selectedInputMode !== 'hand' || cameraRunState !== 'running') return;
+  lastFingertips = fingertips;
+  drawFingertipDots(lastFingertips);
+  gestureProgress.value = hold;
+
+  if (state === 'none') {
+    handStatus.textContent = 'No hand detected.';
+    gestureCountIndicator.textContent = 'No fingers detected';
+    gestureProgressLabel.textContent = 'Hold a gesture steady to select.';
+    return;
+  }
+
+  const countLabel = `${fingers} ${fingers === 1 ? 'finger' : 'fingers'} detected`;
+  gestureCountIndicator.textContent = `${Array.from({ length: fingers }, () => '●').join(' ')}${fingers ? ' — ' : ''}${countLabel}`;
+
+  if (state === 'unsupported') {
+    handStatus.textContent = 'Raise 1, 2, or 3 fingers.';
+    gestureProgress.value = 0;
+    gestureProgressLabel.textContent = 'Unsupported gesture';
+    return;
+  }
+
+  const brightness = fingers === 1 ? 'Low' : fingers === 2 ? 'Medium' : 'High';
+  handStatus.textContent = applied
+    ? `${brightness} brightness applied.`
+    : `${countLabel} → Hold for ${brightness}.`;
+  gestureProgressLabel.textContent = applied
+    ? `${hand} hand · gesture selected`
+    : 'Hold steady to apply';
+}
+
+const handVideoResizeObserver = new ResizeObserver(() => {
+  drawFingertipDots(lastFingertips);
+});
+handVideoResizeObserver.observe(handVideoFrame);
+
+function setPublishButtonState(state: typeof publishButtonState): void {
+  publishButtonState = state;
+  const labels: Record<typeof publishButtonState, string> = {
+    ready: 'Publish now',
+    publishing: 'Publishing…',
+    published: 'Published ✓',
+    error: 'Publish now',
+  };
+  publishBtn.textContent = labels[state];
+  publishBtn.disabled = state === 'publishing';
+  publishBtn.dataset.state = state;
+}
+
+function setVoiceButtonState(): void {
+  const active = voiceController?.isActive ?? false;
+  microphoneBtn.textContent = voiceRunState === 'starting'
+    ? 'Starting microphone…'
+    : active
+      ? 'Turn microphone off'
+      : 'Turn microphone on';
+  microphoneBtn.disabled = voiceRunState === 'starting';
+  microphoneBtn.setAttribute('aria-pressed', String(active));
+  microphoneState.textContent = voiceRunState === 'listening'
+    ? 'Listening'
+    : voiceRunState === 'listening-unmetered'
+      ? 'Listening · level unavailable'
+      : voiceRunState === 'starting'
+        ? 'Requesting microphone access…'
+        : voiceRunState === 'error'
+          ? 'Microphone error'
+          : 'Microphone off';
+  microphoneState.classList.toggle('is-active', active);
+  microphoneState.classList.toggle('is-error', voiceRunState === 'error');
+  voiceStatus.classList.toggle('is-error', voiceRunState === 'error');
+  voiceMeter.dataset.state = voiceRunState;
+  voiceMeterState.textContent = voiceRunState === 'listening'
+    ? 'Listening · speak to see activity'
+    : voiceRunState === 'listening-unmetered'
+      ? 'Live audio level is unavailable in this browser.'
+      : voiceRunState === 'starting'
+        ? 'Waiting for microphone permission…'
+        : voiceRunState === 'error'
+          ? 'Microphone unavailable'
+          : 'Microphone off';
+}
+
+function drawVoiceActivity(level: number | null): void {
+  const context = voiceActivityCanvas.getContext('2d');
+  if (!context) return;
+
+  if (level === null) {
+    voiceAudioLevels.fill(0);
+  } else {
+    voiceAudioLevels.push(level);
+    voiceAudioLevels.shift();
+  }
+
+  const rect = voiceActivityCanvas.getBoundingClientRect();
+  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const width = Math.max(1, Math.round(rect.width * pixelRatio));
+  const height = Math.max(1, Math.round(rect.height * pixelRatio));
+  if (voiceActivityCanvas.width !== width || voiceActivityCanvas.height !== height) {
+    voiceActivityCanvas.width = width;
+    voiceActivityCanvas.height = height;
+  }
+
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  context.clearRect(0, 0, rect.width, rect.height);
+  const midY = rect.height / 2;
+  context.beginPath();
+  voiceAudioLevels.forEach((sample, index) => {
+    const x = (index / (voiceAudioLevels.length - 1)) * rect.width;
+    const amplitude = sample === 0 ? 0 : Math.min(sample * 5, 0.9) * rect.height * 0.46;
+    const y = midY - amplitude;
+    if (index === 0) context.moveTo(x, y);
+    else context.lineTo(x, y);
+  });
+  context.lineWidth = 2;
+  context.lineJoin = 'round';
+  context.lineCap = 'round';
+  context.strokeStyle = voiceRunState === 'listening' ? '#7ce3a2' : '#647080';
+  context.shadowColor = voiceRunState === 'listening'
+    ? 'rgba(124, 227, 162, 0.55)'
+    : 'transparent';
+  context.shadowBlur = voiceRunState === 'listening' ? 5 : 0;
+  context.stroke();
+  context.shadowBlur = 0;
+}
+
+function initializeInputControllers(): void {
+  handController = new HandGestureController(
+    handCamera,
+    (message, state) => {
+      if (state) cameraRunState = state;
+      cameraStatusMessage = message;
+      if (state === 'error') handStatus.textContent = message;
+      handStatus.classList.toggle('is-error', state === 'error');
+      updateHandButtons();
+    },
+    (feedback) => renderGestureFeedback(
+      feedback.hand,
+      feedback.fingers,
+      feedback.fingertips,
+      feedback.holdProgress,
+      feedback.applied,
+      feedback.state
+    ),
+    (fingers) => {
+      const preset: IntensityPreset = fingers === 1 ? 'low' : fingers === 2 ? 'medium' : 'high';
+      setIntensity(preset, 'hand');
+    }
+  );
+  voiceController = new VoiceCommandController(
+    (message, state) => {
+      voiceRunState = state;
+      voiceStatus.textContent = message;
+      setVoiceButtonState();
+      drawVoiceActivity(state === 'listening' ? 0 : null);
+    },
+    (preset) => setIntensity(preset, 'voice'),
+    drawVoiceActivity
+  );
+  handController.setPreference(handSelection.value as HandPreference);
+  handController.setEnabled(selectedInputMode === 'hand');
+}
+
+function selectInputTab(tab: HTMLButtonElement, focus = false): void {
+  const panelId = tab.getAttribute('aria-controls');
+  const nextMode: InputMode = panelId === 'panel-hand'
+    ? 'hand'
+    : panelId === 'panel-voice'
+      ? 'voice'
+      : 'manual';
+  if (selectedInputMode !== nextMode) {
+    selectedInputMode = nextMode;
+    handController?.setEnabled(nextMode === 'hand');
+    if (nextMode !== 'hand') {
+      lastFingertips = [];
+      drawFingertipDots([]);
+      gestureProgress.value = 0;
+      handStatus.textContent = '';
+      gestureCountIndicator.textContent = cameraRunState === 'running'
+        ? 'Tracking paused'
+        : '';
+      gestureProgressLabel.textContent = cameraRunState === 'running'
+        ? 'Return to Hand gestures to resume.'
+        : 'Start the camera to enable tracking.';
+    }
+    if (nextMode !== 'voice') voiceController?.stop();
+    updateHandButtons();
+  }
+  for (const item of inputTabs) {
+    const selected = item === tab;
+    item.setAttribute('aria-selected', String(selected));
+    item.tabIndex = selected ? 0 : -1;
+  }
+  for (const panel of inputTabPanels) panel.hidden = panel.id !== panelId;
+  if (focus) tab.focus();
 }
 
 function refreshHandleButtons(): void {
@@ -343,7 +701,9 @@ function refreshHandleButtons(): void {
 function updateRoleButtons(meta: SessionMeta): void {
   // Expert can publish while in lobby or after the previous round; novice can
   // submit (and resubmit) whenever a task is live.
-  publishBtn.classList.toggle('hidden', !(role === 'expert' && meta.phase !== 'task'));
+  const canPublish = role === 'expert' && meta.phase !== 'task';
+  publishBtn.classList.toggle('hidden', !canPublish);
+  if (canPublish && publishButtonState === 'published') setPublishButtonState('ready');
   const taskLive = meta.phase === 'task' || meta.phase === 'submitted';
   submitBtn.classList.toggle('hidden', !(role === 'novice' && taskLive));
 }
@@ -505,11 +865,87 @@ headTrackingBtn.addEventListener('click', async () => {
 
 refreshHandleButtons();
 
-document.querySelectorAll<HTMLInputElement>('input[name="intensity"]').forEach((input) => {
-  input.addEventListener('change', () => {
-    scene?.setIntensityPreset(input.value as IntensityPreset);
+intensityButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    if (selectedInputMode !== 'manual') return;
+    const preset = button.dataset.intensity;
+    if (preset === 'low' || preset === 'medium' || preset === 'high') {
+      setIntensity(preset, 'manual');
+    }
   });
 });
+document.addEventListener('keydown', (event) => {
+  if (
+    selectedInputMode !== 'manual'
+    || event.altKey
+    || event.ctrlKey
+    || event.metaKey
+    || isTypingTarget(event.target)
+  ) return;
+  const preset = event.key === '1' ? 'low' : event.key === '2' ? 'medium' : event.key === '3' ? 'high' : null;
+  if (!preset) return;
+  event.preventDefault();
+  setIntensity(preset, 'manual');
+});
+startCameraBtn.addEventListener('click', () => {
+  if (!handController) initializeInputControllers();
+  handStarting = true;
+  cameraRunState = 'starting';
+  cameraStatusMessage = 'Requesting camera permission…';
+  handStatus.textContent = '';
+  handStatus.classList.remove('is-error');
+  updateHandButtons();
+  void handController?.start().finally(() => {
+    handStarting = false;
+    updateHandButtons();
+  });
+});
+stopCameraBtn.addEventListener('click', () => {
+  handController?.stop();
+  handStarting = false;
+  cameraRunState = 'off';
+  cameraStatusMessage = 'Camera off · Tracking inactive';
+  updateHandButtons();
+});
+handSelection.addEventListener('change', () => {
+  handController?.setPreference(handSelection.value as HandPreference);
+});
+cameraPreviewToggle.addEventListener('click', () => {
+  previewMinimized = !previewMinimized;
+  gesturePanel.classList.toggle('preview-minimized', previewMinimized);
+  updateHandButtons();
+});
+for (const tab of inputTabs) {
+  tab.addEventListener('click', () => selectInputTab(tab));
+  tab.addEventListener('keydown', (event) => {
+    const index = inputTabs.indexOf(tab);
+    const nextIndex = event.key === 'ArrowRight'
+      ? (index + 1) % inputTabs.length
+      : event.key === 'ArrowLeft'
+        ? (index - 1 + inputTabs.length) % inputTabs.length
+        : event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? inputTabs.length - 1
+        : -1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    const nextTab = inputTabs[nextIndex];
+    if (nextTab) selectInputTab(nextTab, true);
+  });
+}
+microphoneBtn.addEventListener('click', () => {
+  if (!voiceController) initializeInputControllers();
+  if (voiceController?.isActive) voiceController.stop();
+  else voiceController?.start();
+  setVoiceButtonState();
+});
+initializeInputControllers();
+updateHandButtons();
+setVoiceButtonState();
+drawVoiceActivity(null);
+setIntensity(selectedIntensityPreset, 'manual');
+setPublishButtonState('ready');
 
 publishBtn.addEventListener('click', () => {
   if (role !== 'expert' || !scene) return;
@@ -814,6 +1250,11 @@ leaveBtn.addEventListener('click', () => {
   headTrackingBtn.setAttribute('aria-pressed', 'false');
   // Tell the server to free our role slot synchronously (no reconnect race).
   socket.emit('session:leave');
+  handController?.stop();
+  handStarting = false;
+  voiceController?.stop();
+  updateHandButtons();
+  setVoiceButtonState();
   role = null;
   phase = 'lobby';
   lastMeta = null;
@@ -864,11 +1305,13 @@ socket.on('task:published', (task) => {
   tasks = tasks.filter((t) => t.id !== task.id).concat(task);
   refreshTasksUi(task.id);
   if (role === 'expert') {
+    setPublishButtonState('published');
     setActionStatus('Task published successfully.', 'success');
     publishStatusTimeout = window.setTimeout(() => {
       if (actionStatus.textContent === 'Task published successfully.') {
         setActionStatus('');
       }
+      setPublishButtonState('ready');
     }, 4000);
   }
 });
