@@ -95,10 +95,10 @@ io.on('connection', (socket) => {
     ack({ ok: true });
   });
 
-  socket.on('phone:orientation', ({ x, y }) => {
+  socket.on('phone:orientation', ({ x, y, z }) => {
     if (!phoneSessionCode) return;
     if (!getSession(phoneSessionCode)) return;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    if (![x, y, z].every(Number.isFinite)) return;
 
     // Limit updates to approximately 20 per second.
     const now = Date.now();
@@ -109,6 +109,7 @@ io.on('connection', (socket) => {
       targetRole: phoneTargetRole,
       x: Math.max(-1, Math.min(1, x)),
       y: Math.max(-1, Math.min(1, y)),
+      z: Math.max(-1, Math.min(1, z)),
     });
   });
 

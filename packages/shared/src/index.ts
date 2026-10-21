@@ -152,7 +152,11 @@ export interface ClientToServerEvents {
   ) => void;
 
   /** Normalized phone tilt, between -1 and 1. */
-  'phone:orientation': (orientation: { x: number; y: number }) => void;
+  'phone:orientation': (direction: {
+  x: number;
+  y: number;
+  z: number;
+}) => void;
   /** Expert creates a session and becomes its expert. */
   'session:create': (ack: (meta: SessionMeta) => void) => void;
   /** Novice joins by 5-character session code. */
@@ -182,11 +186,12 @@ export interface ClientToServerEvents {
 
 export interface ServerToClientEvents {
    /** Phone movement forwarded to the selected desktop role. */
-  'phone:orientation': (orientation: {
-    targetRole: Role;
-    x: number;
-    y: number;
-  }) => void;
+  'phone:orientation': (direction: {
+  targetRole: Role;
+  x: number;
+  y: number;
+  z: number;
+}) => void;
   'session:meta': (meta: SessionMeta) => void;
   'task:start': (task: TaskStart) => void;
   /** A new task was published (adds to the task history on both clients). */

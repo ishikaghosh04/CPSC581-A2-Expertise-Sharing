@@ -94,9 +94,9 @@ let phase: SessionMeta['phase'] = 'lobby';
 let lastMeta: SessionMeta | null = null;
 let scene: SceneHandle | null = null;
 
-socket.on('phone:orientation', ({ targetRole, x, y }) => {
+socket.on('phone:orientation', ({ targetRole, x, y, z }) => {
   if (role !== targetRole || !scene) return;
-  scene.setPhoneAim(x, y);
+  scene.setPhoneAim(x, y, z);
 });
 
 const headTracker = createHeadTracker(({ x, y }) => {

@@ -36,7 +36,7 @@ export interface SceneHandle {
   setIntensityPreset(preset: IntensityPreset): void;
   setHandle(handle: LightHandle): void;
   setHeadOffset(x: number, y: number): void;
-  setPhoneAim(x: number, y: number): void;
+  setPhoneAim(x: number, y: number, z: number): void;
   resetCamera(): void;
   resetLight(): void;
   dispose(): void;
@@ -165,15 +165,39 @@ export function createScene(
     headOffset.y = THREE.MathUtils.clamp(y, -1, 1);
   };
   
-  const setPhoneAim = (x: number, y: number): void => {
-    const horizontal = THREE.MathUtils.clamp(x, -1, 1);
-    const vertical = THREE.MathUtils.clamp(y, -1, 1);
+  
+  const setPhoneAim = (x: number, y: number, z: number): void => {
+    const direction = new THREE.Vector3(x, y, z);
 
-    // Aim the existing spotlight relative to its default target.
+    if (direction.lengthSq() < 0.001) return;
+    direction.normalize();
+
+    // Original spotlight direction.
+    const defaultDirection = new THREE.Vector3(
+      DEFAULT_LIGHT.target.x - DEFAULT_LIGHT.position.x,
+      DEFAULT_LIGHT.target.y - DEFAULT_LIGHT.position.y,
+      DEFAULT_LIGHT.target.z - DEFAULT_LIGHT.position.z
+    );
+
+    const distance = defaultDirection.length();
+    defaultDirection.normalize();
+
+    // Align the phone's initial forward direction
+    // with the spotlight's default direction.
+    const alignment = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, -1),
+      defaultDirection
+    );
+
+    direction.applyQuaternion(alignment);
+
+    const newTarget = spot.position.clone()
+      .addScaledVector(direction, distance);
+
     aimMarker.position.set(
-      clamp(DEFAULT_LIGHT.target.x + horizontal * 3, -5, 5),
-      clamp(DEFAULT_LIGHT.target.y - vertical * 2, 0, 4),
-      DEFAULT_LIGHT.target.z
+      clamp(newTarget.x, -5, 5),
+      clamp(newTarget.y, 0, 4),
+      clamp(newTarget.z, -5, 5)
     );
   };
 
@@ -268,8 +292,8 @@ export function createScene(
     const up = new THREE.Vector3(0, 1, 0)
       .applyQuaternion(baseQuaternion);
 
-    camera.position.addScaledVector(right, headOffset.x * 0.7);
-    camera.position.addScaledVector(up, -headOffset.y * 0.5);
+    camera.position.addScaledVector(right, headOffset.x * 3.0);
+    camera.position.addScaledVector(up, -headOffset.y * 2.5);
     camera.lookAt(orbit.target);
 
     bulb.position.copy(spot.position);
