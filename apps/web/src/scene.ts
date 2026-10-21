@@ -35,6 +35,8 @@ export interface SceneHandle {
   captureReference(): Promise<string>;
   setIntensityPreset(preset: IntensityPreset): void;
   setHandle(handle: LightHandle): void;
+  setHeadOffset(x: number, y: number): void;
+  setPhoneAim(x: number, y: number, z: number): void;
   resetCamera(): void;
   resetLight(): void;
   dispose(): void;
@@ -155,6 +157,50 @@ export function createScene(
   orbit.enableDamping = true;
   orbit.dampingFactor = 0.08;
   orbit.target.set(DEFAULT_CAMERA.target.x, DEFAULT_CAMERA.target.y, DEFAULT_CAMERA.target.z);
+  // Head tracking controls
+  let headOffset = { x: 0, y: 0 };
+
+  const setHeadOffset = (x: number, y: number): void => {
+    headOffset.x = THREE.MathUtils.clamp(x, -1, 1);
+    headOffset.y = THREE.MathUtils.clamp(y, -1, 1);
+  };
+  
+  
+  const setPhoneAim = (x: number, y: number, z: number): void => {
+    const direction = new THREE.Vector3(x, y, z);
+
+    if (direction.lengthSq() < 0.001) return;
+    direction.normalize();
+
+    // Original spotlight direction.
+    const defaultDirection = new THREE.Vector3(
+      DEFAULT_LIGHT.target.x - DEFAULT_LIGHT.position.x,
+      DEFAULT_LIGHT.target.y - DEFAULT_LIGHT.position.y,
+      DEFAULT_LIGHT.target.z - DEFAULT_LIGHT.position.z
+    );
+
+    const distance = defaultDirection.length();
+    defaultDirection.normalize();
+
+    // Align the phone's initial forward direction
+    // with the spotlight's default direction.
+    const alignment = new THREE.Quaternion().setFromUnitVectors(
+      new THREE.Vector3(0, 0, -1),
+      defaultDirection
+    );
+
+    direction.applyQuaternion(alignment);
+
+    const newTarget = spot.position.clone()
+      .addScaledVector(direction, distance);
+
+    aimMarker.position.set(
+      clamp(newTarget.x, -5, 5),
+      clamp(newTarget.y, 0, 4),
+      clamp(newTarget.z, -5, 5)
+    );
+  };
+
 
   // --- Gizmo -----------------------------------------------------------
   const transform = new TransformControls(camera, renderer.domElement);
@@ -236,10 +282,30 @@ export function createScene(
   let frame = 0;
   const animate = (): void => {
     frame = requestAnimationFrame(animate);
+
     orbit.update();
+  
+    // Apply temporary head movement relative to the normal camera.
+    // Restore the camera afterward so OrbitControls remains independent.
+    const basePosition = camera.position.clone();
+    const baseQuaternion = camera.quaternion.clone();
+
+    const right = new THREE.Vector3(1, 0, 0)
+      .applyQuaternion(baseQuaternion);
+    const up = new THREE.Vector3(0, 1, 0)
+      .applyQuaternion(baseQuaternion);
+
+    camera.position.addScaledVector(right, headOffset.x * 3.0);
+    camera.position.addScaledVector(up, -headOffset.y * 2.5);
+    camera.lookAt(orbit.target);
+
     bulb.position.copy(spot.position);
     beam.geometry.setFromPoints([bulb.position, aimMarker.position]);
+
     renderer.render(scene, camera);
+
+    camera.position.copy(basePosition);
+    camera.quaternion.copy(baseQuaternion);
   };
   animate();
 
@@ -321,6 +387,8 @@ export function createScene(
   return {
     state,
     captureReference,
+    setHeadOffset,
+    setPhoneAim,
     setIntensityPreset,
     setHandle,
     resetCamera,

@@ -76,6 +76,43 @@ const io = new Server<ClientToServerEvents, ServerToClientEvents>(httpServer);
 
 io.on('connection', (socket) => {
   let role: Role | undefined;
+  
+  // Phone controllers pair without occupying an expert/novice role.
+  let phoneSessionCode: string | null = null;
+  let phoneTargetRole: Role = 'expert';
+  let lastPhoneUpdate = 0;
+
+  socket.on('phone:pair', (code, targetRole, ack) => {
+    const session = getSession(code);
+
+    if (!session || (targetRole !== 'expert' && targetRole !== 'novice')) {
+      ack({ ok: false, error: 'Invalid session code or role.' });
+      return;
+    }
+
+    phoneSessionCode = session.code;
+    phoneTargetRole = targetRole;
+    ack({ ok: true });
+  });
+
+  socket.on('phone:orientation', ({ x, y, z }) => {
+    if (!phoneSessionCode) return;
+    if (!getSession(phoneSessionCode)) return;
+    if (![x, y, z].every(Number.isFinite)) return;
+
+    // Limit updates to approximately 20 per second.
+    const now = Date.now();
+    if (now - lastPhoneUpdate < 50) return;
+    lastPhoneUpdate = now;
+
+    io.to(phoneSessionCode).emit('phone:orientation', {
+      targetRole: phoneTargetRole,
+      x: Math.max(-1, Math.min(1, x)),
+      y: Math.max(-1, Math.min(1, y)),
+      z: Math.max(-1, Math.min(1, z)),
+    });
+  });
+
   let audioFeedbackSelection: {
     taskId: number;
     attribute: AudioFeedbackAttribute;

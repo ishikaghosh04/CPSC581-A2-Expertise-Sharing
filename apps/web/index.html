@@ -55,9 +55,11 @@
                 <button id="toggle-aim" type="button">Aim light</button>
                 <button id="reset-camera" type="button">Reset camera</button>
                 <button id="reset-light" type="button">Reset light</button>
+                <button id="toggle-head-tracking" type="button" aria-pressed="false">
+                  Enable Head Tracking
+                </button>
               </div>
             </section>
-
             <section class="studio-reference" aria-label="Reference preview and session action">
               <section id="preview" class="reference-frame hidden">
                 <canvas id="preview-canvas" width="320" height="180"></canvas>
@@ -65,7 +67,7 @@
               </section>
               <img id="reference" class="reference hidden" alt="Reference image from the expert" />
               <div class="reference-actions">
-                <button id="publish-btn" class="hidden primary" type="button">Publish now</button>
+                <button id="publish-btn" class="hidden primary" type="button">Publish task</button>
                 <button id="submit-btn" class="hidden primary" type="button">Submit attempt</button>
               </div>
               <p id="action-status" class="action-status muted" role="status" aria-live="polite"></p>
@@ -88,10 +90,10 @@
                 </div>
                 <span class="keyboard-hint">Shortcuts: 1 = Low · 2 = Medium · 3 = High</span>
               </section>
-                <section id="panel-hand" class="tab-panel" role="tabpanel" aria-labelledby="tab-hand" hidden>
-                  <h3>Hand gestures</h3>
-                  <p class="muted">Hold 1, 2, or 3 fingers to select brightness.</p>
-                  <div id="gesture-panel" class="gesture-panel">
+              <section id="panel-hand" class="tab-panel" role="tabpanel" aria-labelledby="tab-hand" hidden>
+                <h3>Hand gestures</h3>
+                <p class="muted">Hold 1, 2, or 3 fingers to select brightness.</p>
+                <div id="gesture-panel" class="gesture-panel">
                   <div class="gesture-camera">
                     <div id="hand-video-frame" class="hand-video-frame">
                       <video id="hand-camera" class="hidden" autoplay playsinline muted aria-label="Mirrored hand tracking camera preview"></video>
@@ -130,7 +132,8 @@
                 </div>
                 <p id="voice-status" class="control-state" role="status" aria-live="polite">Microphone is off.</p>
               </section>
-          </aside>
+            </aside>
+          </div>
           <section id="hint-panel" class="feedback-panel hidden">
             <div class="hint-controls">
               <button id="request-hint" type="button">Get a hint</button>
