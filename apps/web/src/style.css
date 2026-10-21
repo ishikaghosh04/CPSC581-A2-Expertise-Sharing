@@ -476,6 +476,20 @@ input {
   color: #10131a;
 }
 
+.microphone-toggle {
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.microphone-toggle[data-active='true'] {
+  background: #c83d45;
+  color: #ffffff;
+}
+
+.microphone-toggle[data-active='false'] {
+  background: #86d7a4;
+  color: #10131a;
+}
+
 .head-tracking-toggle:disabled {
   cursor: progress;
 }

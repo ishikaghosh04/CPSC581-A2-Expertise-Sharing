@@ -713,14 +713,11 @@ function setPublishButtonState(state: typeof publishButtonState): void {
 }
 
 function setVoiceButtonState(): void {
-  const active = voiceController?.isActive ?? false;
-  microphoneBtn.textContent = voiceRunState === 'starting'
-    ? 'Starting microphone…'
-    : active
-      ? 'Turn microphone off'
-      : 'Turn microphone on';
+  const active = voiceRunState === 'listening' || voiceRunState === 'listening-unmetered';
+  microphoneBtn.textContent = active ? 'Disable microphone' : 'Enable microphone';
   microphoneBtn.disabled = voiceRunState === 'starting';
   microphoneBtn.setAttribute('aria-pressed', String(active));
+  microphoneBtn.dataset.active = String(active);
   microphoneState.textContent = voiceRunState === 'listening'
     ? 'Listening'
     : voiceRunState === 'listening-unmetered'
