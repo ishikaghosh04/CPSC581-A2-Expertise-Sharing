@@ -1,0 +1,247 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+  <title>Phone Spotlight Controller</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #111827;
+      color: white;
+      padding: 24px;
+      text-align: center;
+    }
+    input, select, button {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 14px;
+      margin: 8px 0;
+      border-radius: 10px;
+      font-size: 17px;
+    }
+    button {
+      background: #facc15;
+      color: #111827;
+      border: none;
+      font-weight: bold;
+    }
+    button:disabled { opacity: 0.45; }
+    #status { margin: 20px 0; }
+    #values { color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <h1>📱 Spotlight Controller</h1>
+  <p>Use your iPhone to aim the 3D spotlight.</p>
+
+  <input id="code" maxlength="5"
+         placeholder="Enter session code">
+
+  <select id="role">
+    <option value="expert">Control Expert</option>
+    <option value="novice">Control Novice</option>
+  </select>
+
+  <button id="pair">Connect to Session</button>
+  <button id="start" disabled>Enable Motion Control</button>
+  <button id="calibrate" disabled>Calibrate</button>
+  <button id="stop" disabled>Stop Tracking</button>
+
+  <p id="status">Connecting to server...</p>
+  <p id="values">Waiting for phone movement...</p>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    const codeInput = document.getElementById('code');
+    const roleInput = document.getElementById('role');
+    const startButton = document.getElementById('start');
+    const calibrateButton = document.getElementById('calibrate');
+    const stopButton = document.getElementById('stop');
+    const status = document.getElementById('status');
+    const values = document.getElementById('values');
+
+    let paired = false;
+    let tracking = false;
+    let neutralQuaternion = null;
+    let latestQuaternion = null;
+    let lastSent = 0;
+
+    socket.on('connect', () => {
+      status.textContent = 'Connected. Enter your session code.';
+      paired = false;
+      tracking = false;
+      startButton.disabled = true;
+      calibrateButton.disabled = true;
+      stopButton.disabled = true;
+    });
+
+    socket.on('disconnect', () => {
+      paired = false;
+      tracking = false;
+      status.textContent = 'Disconnected. Reconnect to the session.';
+      startButton.disabled = true;
+      calibrateButton.disabled = true;
+      stopButton.disabled = true;
+    });
+
+    document.getElementById('pair').onclick = () => {
+      const code = codeInput.value.trim().toUpperCase();
+      if (!socket.connected) {
+        status.textContent = 'Server is not connected.';
+        return;
+      }
+
+      socket.emit('phone:pair', code, roleInput.value, (result) => {
+        paired = result.ok;
+        startButton.disabled = !paired;
+        status.textContent = paired
+          ? 'Paired! Enable motion control.'
+          : result.error || 'Could not pair.';
+      });
+    };
+
+    const clamp = (value) =>
+      Math.max(-1, Math.min(1, value));
+
+    
+    const radians = (degrees) => degrees * Math.PI / 180;
+
+    function multiplyQuaternion(a, b) {
+      return {
+        x: a.w*b.x + a.x*b.w + a.y*b.z - a.z*b.y,
+        y: a.w*b.y - a.x*b.z + a.y*b.w + a.z*b.x,
+        z: a.w*b.z + a.x*b.y - a.y*b.x + a.z*b.w,
+        w: a.w*b.w - a.x*b.x - a.y*b.y - a.z*b.z
+      };
+    }
+
+    function conjugateQuaternion(q) {
+      return { x: -q.x, y: -q.y, z: -q.z, w: q.w };
+    }
+
+    function orientationQuaternion(alpha, beta, gamma) {
+      const a = radians(alpha) / 2;
+      const b = radians(beta) / 2;
+      const g = radians(gamma) / 2;
+
+      const qZ = { x: 0, y: 0, z: Math.sin(a), w: Math.cos(a) };
+      const qX = { x: Math.sin(b), y: 0, z: 0, w: Math.cos(b) };
+      const qY = { x: 0, y: Math.sin(g), z: 0, w: Math.cos(g) };
+
+      return multiplyQuaternion(multiplyQuaternion(qZ, qX), qY);
+    }
+
+    function rotateVector(q, v) {
+      const tx = 2 * (q.y*v.z - q.z*v.y);
+      const ty = 2 * (q.z*v.x - q.x*v.z);
+      const tz = 2 * (q.x*v.y - q.y*v.x);
+
+      return {
+        x: v.x + q.w*tx + q.y*tz - q.z*ty,
+        y: v.y + q.w*ty + q.z*tx - q.x*tz,
+        z: v.z + q.w*tz + q.x*ty - q.y*tx
+      };
+    }
+  
+
+    
+    function onOrientation(event) {
+      if (!tracking || !paired) return;
+
+      const { alpha, beta, gamma } = event;
+      if (alpha == null || beta == null || gamma == null) return;
+
+      latestQuaternion = orientationQuaternion(alpha, beta, gamma);
+
+      // The first valid reading becomes the initial reference.
+      if (!neutralQuaternion) {
+        neutralQuaternion = latestQuaternion;
+      }
+
+      // Rotation relative to the calibrated phone position.
+      const relative = multiplyQuaternion(
+        conjugateQuaternion(neutralQuaternion),
+        latestQuaternion
+      );
+
+      // The rear camera points along the phone's local -Z axis.
+      const direction = rotateVector(relative, {
+        x: 0,
+        y: 0,
+        z: -1
+      });
+
+      values.textContent =
+        `X: ${direction.x.toFixed(2)} | ` +
+        `Y: ${direction.y.toFixed(2)} | ` +
+        `Z: ${direction.z.toFixed(2)}`;
+
+      const now = performance.now();
+
+      if (now - lastSent >= 50) {
+        socket.emit('phone:orientation', direction);
+        lastSent = now;
+      }
+    }
+
+
+    startButton.onclick = async () => {
+      try {
+        if (typeof DeviceOrientationEvent === 'undefined') {
+          status.textContent = 'Motion sensors unavailable.';
+          return;
+        }
+
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+          const permission =
+            await DeviceOrientationEvent.requestPermission();
+
+          if (permission !== 'granted') {
+            status.textContent = 'Motion permission denied.';
+            return;
+          }
+        }
+        neutralQuaternion = null;
+        latestQuaternion = null;
+        tracking = true;
+        window.addEventListener('deviceorientation', onOrientation);
+
+        startButton.disabled = true;
+        calibrateButton.disabled = false;
+        stopButton.disabled = false;
+        status.textContent =
+          'Tracking! Hold your phone steady and tap Calibrate.';
+      } catch (error) {
+        status.textContent = 'Error: ' + error.message;
+      }
+    };
+
+    
+    calibrateButton.onclick = () => {
+      if (!latestQuaternion) {
+        status.textContent = 'Waiting for orientation data.';
+        return;
+      }
+
+      neutralQuaternion = { ...latestQuaternion };
+      status.textContent = 'Calibrated! Point your phone to aim.';
+    };
+
+
+    stopButton.onclick = () => {
+      tracking = false;
+      window.removeEventListener('deviceorientation', onOrientation);
+
+      startButton.disabled = !paired;
+      calibrateButton.disabled = true;
+      stopButton.disabled = true;
+      status.textContent = 'Tracking stopped.';
+    };
+  </script>
+</body>
+</html>

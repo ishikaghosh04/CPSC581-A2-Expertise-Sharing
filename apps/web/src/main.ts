@@ -17,6 +17,7 @@ import type {
 } from '@expertise-sharing/shared';
 
 import { createScene, type LightHandle, type SceneHandle } from './scene.js';
+import { createHeadTracker } from './headTracking.js';
 
 const CODE_LENGTH = 5;
 
@@ -45,6 +46,7 @@ const toggleMoveBtn = el<HTMLButtonElement>('#toggle-move');
 const toggleAimBtn = el<HTMLButtonElement>('#toggle-aim');
 const resetCameraBtn = el<HTMLButtonElement>('#reset-camera');
 const resetLightBtn = el<HTMLButtonElement>('#reset-light');
+const headTrackingBtn = el<HTMLButtonElement>('#toggle-head-tracking');
 const previewPanel = el<HTMLElement>('#preview');
 const previewCanvas = el<HTMLCanvasElement>('#preview-canvas');
 const publishBtn = el<HTMLButtonElement>('#publish-btn');
@@ -91,6 +93,17 @@ let role: Role | null = null;
 let phase: SessionMeta['phase'] = 'lobby';
 let lastMeta: SessionMeta | null = null;
 let scene: SceneHandle | null = null;
+
+socket.on('phone:orientation', ({ targetRole, x, y, z }) => {
+  if (role !== targetRole || !scene) return;
+  scene.setPhoneAim(x, y, z);
+});
+
+const headTracker = createHeadTracker(({ x, y }) => {
+  scene?.setHeadOffset(x, y);
+});
+
+let headTrackingEnabled = false;
 let activeHandle: LightHandle = 'bulb';
 let tasks: TaskEntry[] = [];
 let attempts: Attempt[] = [];
@@ -458,6 +471,38 @@ toggleAimBtn.addEventListener('click', () => {
 });
 resetCameraBtn.addEventListener('click', () => scene?.resetCamera());
 resetLightBtn.addEventListener('click', () => scene?.resetLight());
+headTrackingBtn.addEventListener('click', async () => {
+  if (headTrackingEnabled) {
+    headTracker.stop();
+    headTrackingEnabled = false;
+    headTrackingBtn.textContent = 'Enable Head Tracking';
+    headTrackingBtn.setAttribute('aria-pressed', 'false');
+    return;
+  }
+
+  if (!scene) {
+    alert('Join or create a session first.');
+    return;
+  }
+
+  headTrackingBtn.disabled = true;
+  headTrackingBtn.textContent = 'Starting webcam...';
+
+  try {
+    await headTracker.start();
+    headTrackingEnabled = true;
+    headTrackingBtn.textContent = 'Disable Head Tracking';
+    headTrackingBtn.setAttribute('aria-pressed', 'true');
+  } catch (error) {
+    console.error('Head tracking failed:', error);
+    headTrackingEnabled = false;
+    headTrackingBtn.textContent = 'Enable Head Tracking';
+    alert('Could not start head tracking. Check webcam permissions and the browser console.');
+  } finally {
+    headTrackingBtn.disabled = false;
+  }
+});
+
 refreshHandleButtons();
 
 document.querySelectorAll<HTMLInputElement>('input[name="intensity"]').forEach((input) => {
@@ -763,6 +808,10 @@ chatForm.addEventListener('submit', (event) => {
 });
 
 leaveBtn.addEventListener('click', () => {
+  headTracker.stop();
+  headTrackingEnabled = false;
+  headTrackingBtn.textContent = 'Enable Head Tracking';
+  headTrackingBtn.setAttribute('aria-pressed', 'false');
   // Tell the server to free our role slot synchronously (no reconnect race).
   socket.emit('session:leave');
   role = null;
