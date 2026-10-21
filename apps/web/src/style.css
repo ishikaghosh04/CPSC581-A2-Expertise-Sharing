@@ -306,6 +306,7 @@ input {
 
 .scene-toolbar {
   margin-top: 8px;
+  margin-bottom: 0;
 }
 
 .scene-toolbar button {
@@ -327,6 +328,50 @@ input {
 .reference-actions {
   display: grid;
   gap: 8px;
+}
+
+.head-tracking-controls {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.head-tracking-toggle {
+  justify-self: stretch;
+  background: var(--line);
+  color: var(--text);
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.head-tracking-toggle[data-active='true'] {
+  background: #c83d45;
+  color: #ffffff;
+}
+
+.head-tracking-toggle[data-active='false'] {
+  background: #86d7a4;
+  color: #10131a;
+}
+
+.head-tracking-toggle:disabled {
+  cursor: progress;
+}
+
+.head-tracking-instruction {
+  margin: 0;
+  padding: 0 2px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.workspace-publish-actions {
+  margin-top: 10px;
+}
+
+.workspace-publish-actions button {
+  width: 100%;
+  min-height: 44px;
 }
 
 .reference-actions button {
@@ -378,9 +423,25 @@ input {
   margin: 0;
   padding: 7px 9px;
   border-radius: 7px;
-  background: #242832;
-  color: #dce9ff;
+  background: #343943;
+  color: #f1f2f5;
   font-weight: 700;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+.current-brightness[data-level='low'] {
+  background: #164b32;
+  color: #d1fae5;
+}
+
+.current-brightness[data-level='medium'] {
+  background: #594800;
+  color: #fff3b0;
+}
+
+.current-brightness[data-level='high'] {
+  background: #5c2525;
+  color: #ffe0e0;
 }
 
 .intensity-row {
@@ -535,20 +596,6 @@ input {
   color: #ffaaaa;
 }
 
-.gesture-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 150px) minmax(0, 1fr);
-  align-items: start;
-  gap: 8px;
-  width: 100%;
-  padding: 0;
-  color: var(--text);
-}
-
-.gesture-panel.camera-off {
-  grid-template-columns: minmax(0, 1fr);
-}
-
 .gesture-camera {
   display: grid;
   gap: 5px;
@@ -556,13 +603,67 @@ input {
   width: 100%;
 }
 
+.tracking-preview {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  width: 100%;
+  padding: 0;
+}
+
+.tracking-preview .gesture-camera {
+  width: 100%;
+}
+
+.tracking-preview .hand-video-frame[hidden],
+.tracking-preview .gesture-camera[hidden] {
+  display: none;
+}
+
+.tracking-mode-indicator {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  max-width: calc(100% - 12px);
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: rgba(12, 18, 25, 0.88);
+  color: #f4f7fb;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.tracking-mode-indicator[hidden] {
+  display: none;
+}
+
+.tracking-preview-controls {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+
+.tracking-preview-controls .gesture-details {
+  border-top: 1px solid var(--line);
+  padding-top: 6px;
+}
+
+.tracking-preview-controls button {
+  justify-self: start;
+  padding: 7px 10px;
+  background: var(--line);
+  color: var(--text);
+}
+
 .hand-video-frame {
   position: relative;
   width: 100%;
-  aspect-ratio: 4 / 3;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
-  border: 1px solid #555565;
-  border-radius: 7px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
   background: #0e0e12;
 }
 
@@ -637,23 +738,20 @@ input {
   gap: 5px !important;
 }
 
-.camera-controls .toolbar {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 6px;
-  margin-top: 0;
-}
-
-.camera-controls .toolbar button {
+.camera-controls > button {
   padding: 8px;
   font-size: 0.82rem;
-  background: var(--line);
-  color: var(--text);
+  transition: background-color 180ms ease, color 180ms ease;
+}
+
+#start-camera[data-state='idle'] {
+  background: #86d7a4;
+  color: #10131a;
 }
 
 #start-camera[data-state='running'] {
-  background: #86d7a4;
-  color: #10131a;
+  background: #c83d45;
+  color: #ffffff;
 }
 
 #start-camera:disabled {
@@ -670,16 +768,12 @@ input {
   cursor: not-allowed;
 }
 
-.gesture-panel.preview-minimized .gesture-camera {
+.tracking-preview.preview-minimized .gesture-camera {
   grid-template-columns: 1fr;
 }
 
-.gesture-panel.preview-minimized .preview-toggle {
+.tracking-preview.preview-minimized .preview-toggle {
   justify-self: start;
-}
-
-.gesture-panel.preview-minimized .gesture-details {
-  grid-column: 1 / -1;
 }
 
 #attempts h2 {
@@ -1007,9 +1101,6 @@ input {
     grid-column: 1 / -1;
   }
 
-  .gesture-panel {
-    grid-template-columns: minmax(0, 180px) minmax(0, 1fr);
-  }
 }
 
 @media (max-width: 760px) {

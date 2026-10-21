@@ -54,23 +54,7 @@ function raisedFingerTipIndices(
   return fingers.filter((finger) => finger.extended).map((finger) => finger.tip);
 }
 
-function cameraErrorMessage(error: unknown): string {
-  if (error instanceof DOMException) {
-    if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
-      return 'Camera permission was denied. Allow camera access in browser settings, then try again.';
-    }
-    if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
-      return 'No camera was found. Connect a camera and try again.';
-    }
-    if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
-      return 'The camera is already in use or unavailable. Close other camera apps and try again.';
-    }
-  }
-  return 'Could not start the camera. Check browser permissions and try again.';
-}
-
 export class HandGestureController {
-  private stream: MediaStream | null = null;
   private landmarker: HandLandmarker | null = null;
   private frameRequest = 0;
   private runId = 0;
@@ -100,32 +84,10 @@ export class HandGestureController {
 
   async start(): Promise<void> {
     const runId = ++this.runId;
-    this.onStatus('Requesting camera permission…', 'starting');
-    let loadingTracker = false;
+    this.onStatus('Loading hand tracking…', 'starting');
 
     try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        this.onStatus(
-          'Camera access is unavailable. Use a supported browser on HTTPS or localhost.',
-          'error'
-        );
-        return;
-      }
-
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
-      });
-      if (runId !== this.runId) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-      this.stream = stream;
-      this.video.srcObject = stream;
-      await this.video.play();
-      this.onStatus('Camera on · Loading hand tracking…', 'running');
-
-      loadingTracker = true;
+      if (!this.video.srcObject) throw new Error('The shared camera is not running.');
       const { FilesetResolver, HandLandmarker } = await import('@mediapipe/tasks-vision');
       const wasmFileset = await FilesetResolver.forVisionTasks(WASM_URL);
       const landmarker = await HandLandmarker.createFromOptions(wasmFileset, {
@@ -142,21 +104,23 @@ export class HandGestureController {
       }
 
       this.landmarker = landmarker;
-      this.onStatus('Camera on.', 'running');
+      this.onStatus('Hand tracking is on.', 'running');
       this.detectFrame(runId);
     } catch (error) {
       if (runId !== this.runId) return;
       console.error('hand tracking could not start', error);
-      const message = loadingTracker
-        ? 'Could not load hand tracking. Check your internet connection and try again.'
-        : cameraErrorMessage(error);
-      this.stopWithStatus(message, 'error');
+      this.stopWithStatus(
+        error instanceof Error && error.message === 'The shared camera is not running.'
+          ? error.message
+          : 'Could not load hand tracking. Check your internet connection and try again.',
+        'error'
+      );
     }
   }
 
   stop(): void {
     ++this.runId;
-    this.stopWithStatus('Camera is off.');
+    this.stopWithStatus('Hand tracking is off.');
   }
 
   private detectFrame(runId: number): void {
@@ -284,9 +248,6 @@ export class HandGestureController {
     this.frameRequest = 0;
     this.landmarker?.close();
     this.landmarker = null;
-    this.stream?.getTracks().forEach((track) => track.stop());
-    this.stream = null;
-    this.video.srcObject = null;
     this.resetCandidate();
     this.onGestureFeedback({
       hand: null,

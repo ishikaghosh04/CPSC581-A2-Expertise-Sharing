@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 
-import { DEFAULT_TOLERANCES } from '@expertise-sharing/shared';
+import { DEFAULT_TOLERANCES, INTENSITY_PRESETS } from '@expertise-sharing/shared';
 import type {
   Attempt,
   AttemptFeedback,
@@ -54,6 +54,7 @@ const toggleAimBtn = el<HTMLButtonElement>('#toggle-aim');
 const resetCameraBtn = el<HTMLButtonElement>('#reset-camera');
 const resetLightBtn = el<HTMLButtonElement>('#reset-light');
 const headTrackingBtn = el<HTMLButtonElement>('#toggle-head-tracking');
+const headTrackingInstruction = el<HTMLParagraphElement>('#head-tracking-instruction');
 const selectedIntensity = el<HTMLParagraphElement>('#selected-intensity');
 const intensityButtons = Array.from(
   document.querySelectorAll<HTMLButtonElement>('[data-intensity]')
@@ -63,9 +64,10 @@ const stopCameraBtn = el<HTMLButtonElement>('#stop-camera');
 const handSelection = el<HTMLSelectElement>('#hand-selection');
 const handCamera = el<HTMLVideoElement>('#hand-camera');
 const handVideoFrame = el<HTMLDivElement>('#hand-video-frame');
+const trackingModeIndicator = el<HTMLSpanElement>('#tracking-mode-indicator');
 const fingertipOverlay = el<HTMLCanvasElement>('#hand-fingertip-overlay');
 const handStatus = el<HTMLParagraphElement>('#hand-status');
-const gesturePanel = el<HTMLElement>('#gesture-panel');
+const trackingPreview = el<HTMLElement>('.tracking-preview');
 const gestureCamera = el<HTMLDivElement>('.gesture-camera');
 const gestureProgress = el<HTMLProgressElement>('#gesture-hold-progress');
 const gestureProgressLabel = el<HTMLSpanElement>('#gesture-progress-label');
@@ -133,9 +135,15 @@ let handController: HandGestureController | null = null;
 let voiceController: VoiceCommandController | null = null;
 let voiceRunState: VoiceRunState = 'off';
 const voiceAudioLevels = Array.from({ length: 48 }, () => 0);
+let handTrackingEnabled = false;
 let handStarting = false;
 let cameraRunState: CameraRunState = 'off';
 let cameraStatusMessage = 'Camera off · Tracking inactive';
+let cameraStream: MediaStream | null = null;
+let cameraStartPromise: Promise<void> | null = null;
+let cameraRequestId = 0;
+let headStarting = false;
+let headTrackingRequestId = 0;
 let previewMinimized = false;
 let lastFingertips: FingertipPosition[] = [];
 
@@ -144,7 +152,7 @@ socket.on('phone:orientation', ({ targetRole, x, y, z }) => {
   scene.setPhoneAim(x, y, z);
 });
 
-const headTracker = createHeadTracker(({ x, y }) => {
+const headTracker = createHeadTracker(handCamera, ({ x, y }) => {
   scene?.setHeadOffset(x, y);
 });
 let headTrackingEnabled = false;
@@ -385,14 +393,118 @@ function mountScene(): void {
 
 function setIntensity(preset: IntensityPreset, source: InputMode): void {
   if (source !== selectedInputMode) return;
+  applyIntensityPreset(preset);
+}
+
+function applyIntensityPreset(preset: IntensityPreset): void {
   selectedIntensityPreset = preset;
   scene?.setIntensityPreset(preset);
+  const intensity = INTENSITY_PRESETS[preset];
+  const lowMediumThreshold = (INTENSITY_PRESETS.low + INTENSITY_PRESETS.medium) / 2;
+  const mediumHighThreshold = (INTENSITY_PRESETS.medium + INTENSITY_PRESETS.high) / 2;
+  const level: IntensityPreset = intensity < lowMediumThreshold
+    ? 'low'
+    : intensity < mediumHighThreshold
+      ? 'medium'
+      : 'high';
   for (const button of intensityButtons) {
     const selected = button.dataset.intensity === preset;
     button.setAttribute('aria-pressed', String(selected));
   }
-  selectedIntensity.textContent =
-    `Current brightness: ${preset.charAt(0).toUpperCase()}${preset.slice(1)}`;
+  selectedIntensity.dataset.level = level;
+  selectedIntensity.textContent = `${level.charAt(0).toUpperCase()}${level.slice(1)} intensity`;
+}
+
+function cameraErrorMessage(error: unknown): string {
+  if (error instanceof DOMException) {
+    if (error.name === 'NotAllowedError' || error.name === 'SecurityError') {
+      return 'Camera permission was denied. Allow camera access in browser settings, then try again.';
+    }
+    if (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError') {
+      return 'No camera was found. Connect a camera and try again.';
+    }
+    if (error.name === 'NotReadableError' || error.name === 'TrackStartError') {
+      return 'The camera is already in use or unavailable. Close other camera apps and try again.';
+    }
+  }
+  return 'Could not start the camera. Check browser permissions and try again.';
+}
+
+async function ensureSharedCamera(): Promise<void> {
+  if (cameraStream?.getVideoTracks().some((track) => track.readyState === 'live')) return;
+  if (cameraStartPromise) return cameraStartPromise;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    const error = new Error('Camera access is unavailable. Use a supported browser on HTTPS or localhost.');
+    cameraRunState = 'error';
+    cameraStatusMessage = error.message;
+    updateHandButtons();
+    throw error;
+  }
+
+  const requestId = ++cameraRequestId;
+  cameraRunState = 'starting';
+  cameraStatusMessage = 'Requesting camera permission…';
+  updateHandButtons();
+
+  const pending = (async (): Promise<void> => {
+    let stream: MediaStream | null = null;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } },
+      });
+      if (requestId !== cameraRequestId) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error('Camera start was cancelled.');
+      }
+
+      handCamera.srcObject = stream;
+      await handCamera.play();
+      if (requestId !== cameraRequestId) {
+        stream.getTracks().forEach((track) => track.stop());
+        handCamera.pause();
+        handCamera.srcObject = null;
+        throw new Error('Camera start was cancelled.');
+      }
+
+      cameraStream = stream;
+      cameraRunState = 'running';
+      cameraStatusMessage = 'Camera is on.';
+    } catch (error) {
+      stream?.getTracks().forEach((track) => track.stop());
+      if (stream && handCamera.srcObject === stream) {
+        handCamera.pause();
+        handCamera.srcObject = null;
+      }
+      if (requestId === cameraRequestId) {
+        cameraRunState = 'error';
+        cameraStatusMessage = cameraErrorMessage(error);
+      }
+      throw error;
+    } finally {
+      updateHandButtons();
+    }
+  })();
+  cameraStartPromise = pending;
+  try {
+    await pending;
+  } finally {
+    if (cameraStartPromise === pending) cameraStartPromise = null;
+  }
+}
+
+function releaseCameraIfUnused(): void {
+  if (handTrackingEnabled || headTrackingEnabled) return;
+  if (cameraStartPromise) cameraRequestId += 1;
+  cameraStream?.getTracks().forEach((track) => track.stop());
+  cameraStream = null;
+  handCamera.pause();
+  handCamera.srcObject = null;
+  if (cameraRunState !== 'error') {
+    cameraRunState = 'off';
+    cameraStatusMessage = 'Camera off · Tracking inactive';
+  }
+  updateHandButtons();
 }
 
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -445,39 +557,54 @@ function drawFingertipDots(points: FingertipPosition[]): void {
 }
 
 function updateHandButtons(): void {
-  const cameraIsOn = cameraRunState === 'running';
-  startCameraBtn.disabled = cameraIsOn || cameraRunState === 'starting' || handStarting;
-  stopCameraBtn.disabled = !cameraIsOn && cameraRunState !== 'starting' && !handStarting;
-  startCameraBtn.textContent = cameraIsOn
-    ? '✓ Camera running'
-    : cameraRunState === 'starting' || handStarting
-      ? 'Starting camera…'
-      : 'Start camera';
-  startCameraBtn.dataset.state = cameraIsOn ? 'running' : 'idle';
+  const cameraIsOn = cameraStream !== null;
+  const anyTrackingActive = handTrackingEnabled || headTrackingEnabled;
+  const cameraIsStarting = cameraRunState === 'starting' || handStarting || headStarting;
+  startCameraBtn.disabled = cameraIsStarting;
+  startCameraBtn.textContent = handStarting
+    ? 'Starting hand tracking…'
+    : handTrackingEnabled
+      ? 'Disable hand tracking'
+      : 'Enable hand tracking';
+  startCameraBtn.dataset.state = handTrackingEnabled ? 'running' : 'idle';
+  startCameraBtn.setAttribute('aria-pressed', String(handTrackingEnabled));
+  stopCameraBtn.disabled = !cameraIsOn && !anyTrackingActive && !cameraIsStarting;
+  headTrackingBtn.disabled = headStarting;
+  headTrackingBtn.textContent = headTrackingEnabled
+    ? 'Disable head tracking'
+    : 'Enable head tracking';
+  headTrackingBtn.setAttribute('aria-pressed', String(headTrackingEnabled));
+  headTrackingBtn.dataset.active = String(headTrackingEnabled);
+  headTrackingInstruction.hidden = !headTrackingEnabled;
   gestureCamera.hidden = !cameraIsOn;
-  gesturePanel.classList.toggle('camera-off', !cameraIsOn);
   cameraPreviewToggle.hidden = !cameraIsOn;
   cameraPreviewToggle.setAttribute('aria-expanded', String(!previewMinimized));
   cameraPreviewToggle.textContent = previewMinimized ? 'Show preview' : 'Hide preview';
   handVideoFrame.hidden = previewMinimized || !cameraIsOn;
   handCamera.classList.toggle('hidden', !cameraIsOn);
   fingertipOverlay.classList.toggle('hidden', !cameraIsOn);
-  cameraState.textContent = cameraRunState === 'running'
-    ? selectedInputMode === 'hand' ? cameraStatusMessage : 'Camera on · Gesture control paused'
-    : cameraRunState === 'starting' || handStarting
-      ? 'Starting camera…'
-      : cameraRunState === 'error'
-        ? 'Camera off · Tracking inactive'
+  const activeModes = [
+    handTrackingEnabled ? 'Hand tracking' : '',
+    headTrackingEnabled ? 'Head tracking' : '',
+  ].filter(Boolean);
+  trackingModeIndicator.textContent = activeModes.join(' + ');
+  trackingModeIndicator.hidden = !cameraIsOn || activeModes.length === 0;
+  cameraState.textContent = cameraIsStarting
+    ? cameraStatusMessage
+    : cameraRunState === 'error'
+      ? cameraStatusMessage
+      : cameraIsOn
+        ? `${activeModes.join(' + ') || 'Camera'} active${handTrackingEnabled && selectedInputMode !== 'hand' ? ' · Gesture feedback paused' : ''}`
         : 'Camera off · Tracking inactive';
-  cameraState.classList.toggle('is-active', cameraIsOn);
+  cameraState.classList.toggle('is-active', cameraIsOn && anyTrackingActive);
   cameraState.classList.toggle('is-error', cameraRunState === 'error');
-  if (!cameraIsOn) {
+  if (!handTrackingEnabled || !cameraIsOn) {
     lastFingertips = [];
     gestureCountIndicator.textContent = '';
     gestureProgress.value = 0;
-    gestureProgressLabel.textContent = cameraRunState === 'starting' || handStarting
+    gestureProgressLabel.textContent = handStarting || cameraRunState === 'starting'
       ? 'Waiting for camera access…'
-      : 'Start the camera to enable tracking.';
+      : 'Start hand tracking to enable gestures.';
     if (cameraRunState !== 'error') handStatus.textContent = '';
   } else if (selectedInputMode !== 'hand') {
     lastFingertips = [];
@@ -497,7 +624,7 @@ function renderGestureFeedback(
   applied: boolean,
   state: 'none' | 'unsupported' | 'supported'
 ): void {
-  if (selectedInputMode !== 'hand' || cameraRunState !== 'running') return;
+  if (selectedInputMode !== 'hand' || !handTrackingEnabled || !cameraStream) return;
   lastFingertips = fingertips;
   drawFingertipDots(lastFingertips);
   gestureProgress.value = hold;
@@ -626,8 +753,19 @@ function initializeInputControllers(): void {
   handController = new HandGestureController(
     handCamera,
     (message, state) => {
-      if (state) cameraRunState = state;
       cameraStatusMessage = message;
+      if (state === 'error') {
+        cameraRunState = 'error';
+        handTrackingEnabled = false;
+        handController?.setEnabled(false);
+        releaseCameraIfUnused();
+      } else if (state === 'running') {
+        cameraRunState = cameraStream ? 'running' : 'off';
+      } else if (state === 'starting') {
+        cameraRunState = cameraStream ? 'running' : 'starting';
+      } else {
+        cameraRunState = cameraStream ? 'running' : 'off';
+      }
       if (state === 'error') handStatus.textContent = message;
       handStatus.classList.toggle('is-error', state === 'error');
       updateHandButtons();
@@ -656,7 +794,7 @@ function initializeInputControllers(): void {
     drawVoiceActivity
   );
   handController.setPreference(handSelection.value as HandPreference);
-  handController.setEnabled(selectedInputMode === 'hand');
+  handController.setEnabled(selectedInputMode === 'hand' && handTrackingEnabled);
 }
 
 function selectInputTab(tab: HTMLButtonElement, focus = false): void {
@@ -668,7 +806,7 @@ function selectInputTab(tab: HTMLButtonElement, focus = false): void {
       : 'manual';
   if (selectedInputMode !== nextMode) {
     selectedInputMode = nextMode;
-    handController?.setEnabled(nextMode === 'hand');
+    handController?.setEnabled(nextMode === 'hand' && handTrackingEnabled);
     if (nextMode !== 'hand') {
       lastFingertips = [];
       drawFingertipDots([]);
@@ -691,6 +829,59 @@ function selectInputTab(tab: HTMLButtonElement, focus = false): void {
   }
   for (const panel of inputTabPanels) panel.hidden = panel.id !== panelId;
   if (focus) tab.focus();
+}
+
+async function startHandTracking(): Promise<void> {
+  if (handTrackingEnabled || handStarting) return;
+  if (!handController) initializeInputControllers();
+  handStarting = true;
+  cameraRunState = cameraStream ? 'running' : 'starting';
+  cameraStatusMessage = 'Starting hand tracking…';
+  handStatus.textContent = '';
+  handStatus.classList.remove('is-error');
+  updateHandButtons();
+  try {
+    await ensureSharedCamera();
+    handTrackingEnabled = true;
+    handController?.setEnabled(selectedInputMode === 'hand');
+    await handController?.start();
+  } catch (error) {
+    if (!(error instanceof Error && error.message === 'Camera start was cancelled.')) {
+      handTrackingEnabled = false;
+      if (cameraStream) {
+        cameraRunState = 'error';
+        cameraStatusMessage = error instanceof Error
+          ? error.message
+          : 'Could not start hand tracking.';
+      }
+    }
+    releaseCameraIfUnused();
+  } finally {
+    handStarting = false;
+    updateHandButtons();
+  }
+}
+
+function stopHandTracking(): void {
+  handController?.stop();
+  handTrackingEnabled = false;
+  handStarting = false;
+  releaseCameraIfUnused();
+  updateHandButtons();
+}
+
+function stopAllTracking(): void {
+  headTrackingRequestId += 1;
+  handController?.stop();
+  headTracker.stop();
+  handTrackingEnabled = false;
+  headTrackingEnabled = false;
+  handStarting = false;
+  headStarting = false;
+  releaseCameraIfUnused();
+  cameraRunState = 'off';
+  cameraStatusMessage = 'Camera off · Tracking inactive';
+  updateHandButtons();
 }
 
 function refreshHandleButtons(): void {
@@ -830,36 +1021,52 @@ toggleAimBtn.addEventListener('click', () => {
   refreshHandleButtons();
 });
 resetCameraBtn.addEventListener('click', () => scene?.resetCamera());
-resetLightBtn.addEventListener('click', () => scene?.resetLight());
+resetLightBtn.addEventListener('click', () => {
+  scene?.resetLight();
+  applyIntensityPreset('medium');
+});
 headTrackingBtn.addEventListener('click', async () => {
   if (headTrackingEnabled) {
+    headTrackingRequestId += 1;
     headTracker.stop();
     headTrackingEnabled = false;
-    headTrackingBtn.textContent = 'Enable Head Tracking';
-    headTrackingBtn.setAttribute('aria-pressed', 'false');
+    releaseCameraIfUnused();
+    updateHandButtons();
     return;
   }
 
   if (!scene) {
-    alert('Join or create a session first.');
+    cameraRunState = 'error';
+    cameraStatusMessage = 'Join or create a session before enabling head tracking.';
+    updateHandButtons();
     return;
   }
 
-  headTrackingBtn.disabled = true;
-  headTrackingBtn.textContent = 'Starting webcam...';
-
+  headStarting = true;
+  const requestId = ++headTrackingRequestId;
+  cameraRunState = cameraStream ? 'running' : 'starting';
+  cameraStatusMessage = 'Starting head tracking…';
+  updateHandButtons();
   try {
+    await ensureSharedCamera();
+    if (requestId !== headTrackingRequestId) return;
     await headTracker.start();
+    if (requestId !== headTrackingRequestId) return;
     headTrackingEnabled = true;
-    headTrackingBtn.textContent = 'Disable Head Tracking';
-    headTrackingBtn.setAttribute('aria-pressed', 'true');
   } catch (error) {
     console.error('Head tracking failed:', error);
+    if (requestId !== headTrackingRequestId) return;
     headTrackingEnabled = false;
-    headTrackingBtn.textContent = 'Enable Head Tracking';
-    alert('Could not start head tracking. Check webcam permissions and the browser console.');
+    if (cameraStream) {
+      cameraRunState = 'error';
+      cameraStatusMessage = error instanceof Error
+        ? `Could not start head tracking: ${error.message}`
+        : 'Could not start head tracking. Check camera permissions and try again.';
+    }
+    releaseCameraIfUnused();
   } finally {
-    headTrackingBtn.disabled = false;
+    headStarting = false;
+    updateHandButtons();
   }
 });
 
@@ -888,31 +1095,16 @@ document.addEventListener('keydown', (event) => {
   setIntensity(preset, 'manual');
 });
 startCameraBtn.addEventListener('click', () => {
-  if (!handController) initializeInputControllers();
-  handStarting = true;
-  cameraRunState = 'starting';
-  cameraStatusMessage = 'Requesting camera permission…';
-  handStatus.textContent = '';
-  handStatus.classList.remove('is-error');
-  updateHandButtons();
-  void handController?.start().finally(() => {
-    handStarting = false;
-    updateHandButtons();
-  });
+  if (handTrackingEnabled) stopHandTracking();
+  else void startHandTracking();
 });
-stopCameraBtn.addEventListener('click', () => {
-  handController?.stop();
-  handStarting = false;
-  cameraRunState = 'off';
-  cameraStatusMessage = 'Camera off · Tracking inactive';
-  updateHandButtons();
-});
+stopCameraBtn.addEventListener('click', stopAllTracking);
 handSelection.addEventListener('change', () => {
   handController?.setPreference(handSelection.value as HandPreference);
 });
 cameraPreviewToggle.addEventListener('click', () => {
   previewMinimized = !previewMinimized;
-  gesturePanel.classList.toggle('preview-minimized', previewMinimized);
+  trackingPreview.classList.toggle('preview-minimized', previewMinimized);
   updateHandButtons();
 });
 for (const tab of inputTabs) {
@@ -1244,14 +1436,9 @@ chatForm.addEventListener('submit', (event) => {
 });
 
 leaveBtn.addEventListener('click', () => {
-  headTracker.stop();
-  headTrackingEnabled = false;
-  headTrackingBtn.textContent = 'Enable Head Tracking';
-  headTrackingBtn.setAttribute('aria-pressed', 'false');
+  stopAllTracking();
   // Tell the server to free our role slot synchronously (no reconnect race).
   socket.emit('session:leave');
-  handController?.stop();
-  handStarting = false;
   voiceController?.stop();
   updateHandButtons();
   setVoiceButtonState();

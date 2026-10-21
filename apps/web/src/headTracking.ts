@@ -12,36 +12,29 @@ export interface HeadTracker {
 }
 
 export function createHeadTracker(
+  video: HTMLVideoElement,
   onMove: (position: HeadPosition) => void
 ): HeadTracker {
-  let stream: MediaStream | null = null;
-  let video: HTMLVideoElement | null = null;
   let landmarker: FaceLandmarker | null = null;
   let animationId = 0;
+  let runId = 0;
   let running = false;
   let neutral: HeadPosition | null = null;
   let smoothed: HeadPosition = { x: 0, y: 0 };
 
   async function start(): Promise<void> {
     if (running) return;
+    const currentRun = ++runId;
 
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user' },
-        audio: false,
-      });
-
-      video = document.createElement('video');
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
+      if (!video.srcObject) throw new Error('The shared camera is not running.');
       await video.play();
 
       const vision = await FilesetResolver.forVisionTasks(
         '/mediapipe/wasm'
       );
 
-      landmarker = await FaceLandmarker.createFromOptions(vision, {
+      const nextLandmarker = await FaceLandmarker.createFromOptions(vision, {
         baseOptions: {
           modelAssetPath:
             'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
@@ -50,13 +43,18 @@ export function createHeadTracker(
         runningMode: 'VIDEO',
         numFaces: 1,
       });
+      if (currentRun !== runId) {
+        nextLandmarker.close();
+        return;
+      }
 
+      landmarker = nextLandmarker;
       running = true;
       neutral = null;
       smoothed = { x: 0, y: 0 };
 
       function detect(): void {
-        if (!running || !video || !landmarker) return;
+        if (currentRun !== runId || !running || !landmarker) return;
 
         if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
           const result = landmarker.detectForVideo(video, performance.now());
@@ -94,23 +92,15 @@ export function createHeadTracker(
 
       detect();
     } catch (error) {
-      stop();
+      if (currentRun === runId) stop();
       throw error;
     }
   }
 
   function stop(): void {
+    ++runId;
     running = false;
     cancelAnimationFrame(animationId);
-    stream?.getTracks().forEach((track) => track.stop());
-    stream = null;
-
-    if (video) {
-      video.pause();
-      video.srcObject = null;
-      video = null;
-    }
-
     landmarker?.close();
     landmarker = null;
     neutral = null;

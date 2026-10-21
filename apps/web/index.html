@@ -55,9 +55,17 @@
                 <button id="toggle-aim" type="button">Aim light</button>
                 <button id="reset-camera" type="button">Reset camera</button>
                 <button id="reset-light" type="button">Reset light</button>
-                <button id="toggle-head-tracking" type="button" aria-pressed="false">
-                  Enable Head Tracking
+              </div>
+              <section class="head-tracking-controls" aria-label="Head tracking">
+                <button id="toggle-head-tracking" class="head-tracking-toggle" type="button" aria-pressed="false" data-active="false">
+                  Enable head tracking
                 </button>
+                <p id="head-tracking-instruction" class="head-tracking-instruction" hidden>
+                  Move your head left, right, up, or down to change your view.
+                </p>
+              </section>
+              <div class="reference-actions workspace-publish-actions">
+                <button id="publish-btn" class="hidden primary" type="button">Publish task</button>
               </div>
             </section>
             <section class="studio-reference" aria-label="Reference preview and session action">
@@ -66,8 +74,27 @@
                 <span class="preview-label">Reference preview (no helpers)</span>
               </section>
               <img id="reference" class="reference hidden" alt="Reference image from the expert" />
+              <section class="tracking-preview" aria-label="Shared tracking camera preview">
+                <div class="gesture-camera">
+                  <div id="hand-video-frame" class="hand-video-frame" hidden>
+                    <video id="hand-camera" class="hidden" autoplay playsinline muted aria-label="Mirrored tracking camera preview"></video>
+                    <canvas id="hand-fingertip-overlay" aria-hidden="true"></canvas>
+                    <span id="tracking-mode-indicator" class="tracking-mode-indicator" hidden></span>
+                  </div>
+                  <button id="toggle-camera-preview" class="preview-toggle" type="button" aria-expanded="true" aria-controls="hand-video-frame" hidden>Hide preview</button>
+                </div>
+                <div class="tracking-preview-controls">
+                  <p id="hand-camera-state" class="control-state" role="status" aria-live="polite">Camera off · Tracking inactive</p>
+                  <div class="gesture-details">
+                    <p id="hand-status" class="input-status" role="status" aria-live="polite">No hand detected.</p>
+                    <p id="gesture-count-indicator" class="gesture-count-indicator" aria-live="polite">No fingers detected</p>
+                    <progress id="gesture-hold-progress" class="gesture-progress" max="700" value="0" aria-label="Gesture hold progress"></progress>
+                    <span id="gesture-progress-label" class="gesture-progress-label">Hold a gesture steady to select.</span>
+                  </div>
+                  <button id="stop-camera" type="button" disabled>Stop Camera</button>
+                </div>
+              </section>
               <div class="reference-actions">
-                <button id="publish-btn" class="hidden primary" type="button">Publish task</button>
                 <button id="submit-btn" class="hidden primary" type="button">Submit attempt</button>
               </div>
               <p id="action-status" class="action-status muted" role="status" aria-live="polite"></p>
@@ -75,7 +102,7 @@
 
             <aside class="studio-controls" aria-label="Lighting input">
               <h2>Lighting input</h2>
-              <p id="selected-intensity" class="current-brightness" role="status" aria-live="polite">Current brightness: Medium</p>
+              <p id="selected-intensity" class="current-brightness" data-level="medium" role="status" aria-live="polite">Medium intensity</p>
               <div class="input-tabs" role="tablist" aria-label="Brightness input method">
                 <button id="tab-manual" class="input-tab" type="button" role="tab" aria-selected="true" aria-controls="panel-manual" tabindex="0">Mouse &amp; keyboard</button>
                 <button id="tab-hand" class="input-tab" type="button" role="tab" aria-selected="false" aria-controls="panel-hand" tabindex="-1">Hand gestures</button>
@@ -93,27 +120,8 @@
               <section id="panel-hand" class="tab-panel" role="tabpanel" aria-labelledby="tab-hand" hidden>
                 <h3>Hand gestures</h3>
                 <p class="muted">Hold 1, 2, or 3 fingers to select brightness.</p>
-                <div id="gesture-panel" class="gesture-panel">
-                  <div class="gesture-camera">
-                    <div id="hand-video-frame" class="hand-video-frame">
-                      <video id="hand-camera" class="hidden" autoplay playsinline muted aria-label="Mirrored hand tracking camera preview"></video>
-                      <canvas id="hand-fingertip-overlay" aria-hidden="true"></canvas>
-                    </div>
-                    <button id="toggle-camera-preview" class="preview-toggle" type="button" aria-expanded="true" aria-controls="hand-video-frame">Hide preview</button>
-                  </div>
-                  <div class="gesture-details">
-                    <p id="hand-status" class="input-status" role="status" aria-live="polite">No hand detected.</p>
-                    <p id="gesture-count-indicator" class="gesture-count-indicator" aria-live="polite">No fingers detected</p>
-                    <progress id="gesture-hold-progress" class="gesture-progress" max="700" value="0" aria-label="Gesture hold progress"></progress>
-                    <span id="gesture-progress-label" class="gesture-progress-label">Hold a gesture steady to select.</span>
-                  </div>
-                </div>
                 <div class="control-stack camera-controls">
-                  <div class="toolbar">
-                    <button id="start-camera" type="button">Start camera</button>
-                    <button id="stop-camera" type="button" disabled>Stop camera</button>
-                  </div>
-                  <p id="hand-camera-state" class="control-state" role="status" aria-live="polite">Camera off · Tracking inactive</p>
+                  <button id="start-camera" type="button">Start hand tracking</button>
                   <label for="hand-selection">Track hand</label>
                   <select id="hand-selection" aria-label="Hand to track">
                     <option value="left" selected>Left hand (default)</option>
