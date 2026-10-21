@@ -93,6 +93,12 @@ let role: Role | null = null;
 let phase: SessionMeta['phase'] = 'lobby';
 let lastMeta: SessionMeta | null = null;
 let scene: SceneHandle | null = null;
+
+socket.on('phone:orientation', ({ targetRole, x, y }) => {
+  if (role !== targetRole || !scene) return;
+  scene.setPhoneAim(x, y);
+});
+
 const headTracker = createHeadTracker(({ x, y }) => {
   scene?.setHeadOffset(x, y);
 });

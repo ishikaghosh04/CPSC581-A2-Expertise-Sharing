@@ -1,0 +1,187 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1">
+  <title>Phone Spotlight Controller</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      background: #111827;
+      color: white;
+      padding: 24px;
+      text-align: center;
+    }
+    input, select, button {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 14px;
+      margin: 8px 0;
+      border-radius: 10px;
+      font-size: 17px;
+    }
+    button {
+      background: #facc15;
+      color: #111827;
+      border: none;
+      font-weight: bold;
+    }
+    button:disabled { opacity: 0.45; }
+    #status { margin: 20px 0; }
+    #values { color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <h1>📱 Spotlight Controller</h1>
+  <p>Use your iPhone to aim the 3D spotlight.</p>
+
+  <input id="code" maxlength="5"
+         placeholder="Enter session code">
+
+  <select id="role">
+    <option value="expert">Control Expert</option>
+    <option value="novice">Control Novice</option>
+  </select>
+
+  <button id="pair">Connect to Session</button>
+  <button id="start" disabled>Enable Motion Control</button>
+  <button id="calibrate" disabled>Calibrate</button>
+  <button id="stop" disabled>Stop Tracking</button>
+
+  <p id="status">Connecting to server...</p>
+  <p id="values">Waiting for phone movement...</p>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    const socket = io();
+
+    const codeInput = document.getElementById('code');
+    const roleInput = document.getElementById('role');
+    const startButton = document.getElementById('start');
+    const calibrateButton = document.getElementById('calibrate');
+    const stopButton = document.getElementById('stop');
+    const status = document.getElementById('status');
+    const values = document.getElementById('values');
+
+    let paired = false;
+    let tracking = false;
+    let neutralBeta = 0;
+    let neutralGamma = 0;
+    let latestBeta = null;
+    let latestGamma = null;
+    let lastSent = 0;
+
+    socket.on('connect', () => {
+      status.textContent = 'Connected. Enter your session code.';
+      paired = false;
+      tracking = false;
+      startButton.disabled = true;
+      calibrateButton.disabled = true;
+      stopButton.disabled = true;
+    });
+
+    socket.on('disconnect', () => {
+      paired = false;
+      tracking = false;
+      status.textContent = 'Disconnected. Reconnect to the session.';
+      startButton.disabled = true;
+      calibrateButton.disabled = true;
+      stopButton.disabled = true;
+    });
+
+    document.getElementById('pair').onclick = () => {
+      const code = codeInput.value.trim().toUpperCase();
+      if (!socket.connected) {
+        status.textContent = 'Server is not connected.';
+        return;
+      }
+
+      socket.emit('phone:pair', code, roleInput.value, (result) => {
+        paired = result.ok;
+        startButton.disabled = !paired;
+        status.textContent = paired
+          ? 'Paired! Enable motion control.'
+          : result.error || 'Could not pair.';
+      });
+    };
+
+    const clamp = (value) =>
+      Math.max(-1, Math.min(1, value));
+
+    function onOrientation(event) {
+      if (!tracking || !paired) return;
+
+      const { beta, gamma } = event;
+      if (beta == null || gamma == null) return;
+
+      latestBeta = beta;
+      latestGamma = gamma;
+
+      const x = clamp((gamma - neutralGamma) / 35);
+      const y = clamp((beta - neutralBeta) / 35);
+
+      values.textContent =
+        `Horizontal: ${x.toFixed(2)} | Vertical: ${y.toFixed(2)}`;
+
+      const now = performance.now();
+      if (now - lastSent >= 50) {
+        socket.emit('phone:orientation', { x, y });
+        lastSent = now;
+      }
+    }
+
+    startButton.onclick = async () => {
+      try {
+        if (typeof DeviceOrientationEvent === 'undefined') {
+          status.textContent = 'Motion sensors unavailable.';
+          return;
+        }
+
+        if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+          const permission =
+            await DeviceOrientationEvent.requestPermission();
+
+          if (permission !== 'granted') {
+            status.textContent = 'Motion permission denied.';
+            return;
+          }
+        }
+
+        tracking = true;
+        window.addEventListener('deviceorientation', onOrientation);
+
+        startButton.disabled = true;
+        calibrateButton.disabled = false;
+        stopButton.disabled = false;
+        status.textContent =
+          'Tracking! Hold your phone steady and tap Calibrate.';
+      } catch (error) {
+        status.textContent = 'Error: ' + error.message;
+      }
+    };
+
+    calibrateButton.onclick = () => {
+      if (latestBeta === null || latestGamma === null) {
+        status.textContent = 'Move your phone slightly, then try again.';
+        return;
+      }
+
+      neutralBeta = latestBeta;
+      neutralGamma = latestGamma;
+      status.textContent = 'Calibrated! Tilt to aim the light.';
+    };
+
+    stopButton.onclick = () => {
+      tracking = false;
+      window.removeEventListener('deviceorientation', onOrientation);
+
+      startButton.disabled = !paired;
+      calibrateButton.disabled = true;
+      stopButton.disabled = true;
+      status.textContent = 'Tracking stopped.';
+    };
+  </script>
+</body>
+</html>
