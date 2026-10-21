@@ -36,6 +36,45 @@ function el<T extends HTMLElement>(sel: string): T {
   return node as T;
 }
 
+type Theme = 'day' | 'night';
+
+const themeToggle = el<HTMLButtonElement>('#theme-toggle');
+const themeModeLabel = el<HTMLSpanElement>('#theme-mode-label');
+const themeStorageKey = 'lighting-teacher-theme';
+
+function applyTheme(theme: Theme, persist: boolean): void {
+  document.documentElement.dataset.theme = theme;
+  themeToggle.setAttribute('aria-checked', String(theme === 'night'));
+  themeModeLabel.textContent = theme === 'day' ? 'Day' : 'Night';
+
+  if (persist) {
+    drawVoiceActivity();
+    try {
+      window.localStorage.setItem(themeStorageKey, theme);
+    } catch (error) {
+      console.error('Could not save the selected theme.', error);
+    }
+  }
+}
+
+function loadThemePreference(): Theme {
+  try {
+    const savedTheme = window.localStorage.getItem(themeStorageKey);
+    if (savedTheme === 'day' || savedTheme === 'night') return savedTheme;
+  } catch (error) {
+    console.error('Could not read the saved theme preference.', error);
+  }
+  return window.matchMedia('(prefers-color-scheme: light)').matches ? 'day' : 'night';
+}
+
+applyTheme(loadThemePreference(), false);
+themeToggle.addEventListener('click', () => {
+  const nextTheme: Theme = document.documentElement.dataset.theme === 'day'
+    ? 'night'
+    : 'day';
+  applyTheme(nextTheme, true);
+});
+
 const landing = el<HTMLDivElement>('#landing');
 const appView = el<HTMLDivElement>('#app');
 const landingError = el<HTMLParagraphElement>('#landing-error');
@@ -706,13 +745,13 @@ function setVoiceButtonState(): void {
           : 'Microphone off';
 }
 
-function drawVoiceActivity(level: number | null): void {
+function drawVoiceActivity(level?: number | null): void {
   const context = voiceActivityCanvas.getContext('2d');
   if (!context) return;
 
   if (level === null) {
     voiceAudioLevels.fill(0);
-  } else {
+  } else if (level !== undefined) {
     voiceAudioLevels.push(level);
     voiceAudioLevels.shift();
   }
@@ -740,9 +779,12 @@ function drawVoiceActivity(level: number | null): void {
   context.lineWidth = 2;
   context.lineJoin = 'round';
   context.lineCap = 'round';
-  context.strokeStyle = voiceRunState === 'listening' ? '#7ce3a2' : '#647080';
+  const dayTheme = document.documentElement.dataset.theme === 'day';
+  context.strokeStyle = voiceRunState === 'listening'
+    ? dayTheme ? '#216b3e' : '#7ce3a2'
+    : dayTheme ? '#6b7280' : '#647080';
   context.shadowColor = voiceRunState === 'listening'
-    ? 'rgba(124, 227, 162, 0.55)'
+    ? dayTheme ? 'rgba(33, 107, 62, 0.35)' : 'rgba(124, 227, 162, 0.55)'
     : 'transparent';
   context.shadowBlur = voiceRunState === 'listening' ? 5 : 0;
   context.stroke();
