@@ -76,8 +76,11 @@ themeToggle.addEventListener('click', () => {
 });
 
 const landing = el<HTMLDivElement>('#landing');
+const landingHero = el<HTMLDivElement>('.landing-hero');
 const appView = el<HTMLDivElement>('#app');
 const landingError = el<HTMLParagraphElement>('#landing-error');
+const createSessionBtn = el<HTMLButtonElement>('#create-btn');
+const joinSessionBtn = el<HTMLButtonElement>('#join-btn');
 const codeInput = el<HTMLInputElement>('#join-code');
 const sessionCode = el<HTMLSpanElement>('#session-code');
 const roleTag = el<HTMLSpanElement>('#role-tag');
@@ -126,6 +129,45 @@ const previewCanvas = el<HTMLCanvasElement>('#preview-canvas');
 const publishBtn = el<HTMLButtonElement>('#publish-btn');
 const submitBtn = el<HTMLButtonElement>('#submit-btn');
 const actionStatus = el<HTMLParagraphElement>('#action-status');
+
+let isEnteringStudio = false;
+let landingPointerListenersAttached = false;
+
+function updateLandingLight(event: PointerEvent): void {
+  if (
+    event.pointerType === 'touch' ||
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  ) return;
+  const bounds = landingHero.getBoundingClientRect();
+  const horizontal = (event.clientX - bounds.left) / bounds.width - 0.5;
+  const vertical = (event.clientY - bounds.top) / bounds.height - 0.5;
+  const shadowX = Math.round(-horizontal * 20);
+  const shadowY = Math.round(-vertical * 12);
+  landingHero.style.setProperty('--landing-shadow-x', `${shadowX}px`);
+  landingHero.style.setProperty('--landing-shadow-y', `${shadowY}px`);
+}
+
+function resetLandingLight(): void {
+  landingHero.style.removeProperty('--landing-shadow-x');
+  landingHero.style.removeProperty('--landing-shadow-y');
+}
+
+function attachLandingPointerListeners(): void {
+  if (landingPointerListenersAttached) return;
+  landingHero.addEventListener('pointermove', updateLandingLight);
+  landingHero.addEventListener('pointerleave', resetLandingLight);
+  landingPointerListenersAttached = true;
+}
+
+function detachLandingPointerListeners(): void {
+  if (!landingPointerListenersAttached) return;
+  landingHero.removeEventListener('pointermove', updateLandingLight);
+  landingHero.removeEventListener('pointerleave', resetLandingLight);
+  resetLandingLight();
+  landingPointerListenersAttached = false;
+}
+
+attachLandingPointerListeners();
 const actionConfirmDialog = el<HTMLDialogElement>('#action-confirm-dialog');
 const actionConfirmTitle = el<HTMLHeadingElement>('#action-confirm-title');
 const actionConfirmMessage = el<HTMLParagraphElement>('#action-confirm-message');
@@ -413,6 +455,47 @@ function showApp(): void {
   appView.classList.remove('hidden');
   viewport.classList.remove('hidden');
   mountScene();
+}
+
+async function enterStudio(openStudio: () => void): Promise<void> {
+  if (isEnteringStudio) return;
+  isEnteringStudio = true;
+  createSessionBtn.disabled = true;
+  joinSessionBtn.disabled = true;
+  codeInput.disabled = true;
+  detachLandingPointerListeners();
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (reduceMotion) {
+    openStudio();
+    return;
+  }
+
+  const transitionOverlay = document.createElement('div');
+  transitionOverlay.className = 'studio-transition-overlay';
+  transitionOverlay.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(transitionOverlay);
+
+  try {
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => {
+        transitionOverlay.classList.add('is-covering');
+        window.setTimeout(resolve, 340);
+      });
+    });
+
+    appView.classList.add('studio-revealing');
+    openStudio();
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => appView.classList.remove('studio-revealing'));
+    });
+    transitionOverlay.classList.add('is-revealing');
+
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 360));
+  } finally {
+    transitionOverlay.remove();
+    appView.classList.remove('studio-revealing');
+  }
 }
 
 function mountScene(): void {
@@ -1009,16 +1092,20 @@ function renderMeta(meta: SessionMeta): void {
 
 // --- Landing actions --------------------------------------------------------
 
-el<HTMLButtonElement>('#create-btn').addEventListener('click', () => {
+createSessionBtn.addEventListener('click', () => {
+  if (isEnteringStudio) return;
   landingError.textContent = '';
   socket.emit('session:create', (meta) => {
     role = 'expert';
-    showApp();
-    renderMeta(meta);
+    void enterStudio(() => {
+      showApp();
+      renderMeta(meta);
+    });
   });
 });
 
 function joinSession(): void {
+  if (isEnteringStudio) return;
   const code = codeInput.value.trim().toUpperCase();
   if (code.length !== CODE_LENGTH) {
     landingError.textContent = 'Enter a 5-character session code.';
@@ -1030,12 +1117,15 @@ function joinSession(): void {
       return;
     }
     role = result.role;
-    showApp();
-    renderMeta(result.meta);
+    const meta = result.meta;
+    void enterStudio(() => {
+      showApp();
+      renderMeta(meta);
+    });
   });
 }
 
-el<HTMLButtonElement>('#join-btn').addEventListener('click', joinSession);
+joinSessionBtn.addEventListener('click', joinSession);
 codeInput.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') joinSession();
 });
@@ -1518,6 +1608,11 @@ leaveBtn.addEventListener('click', () => {
   appView.classList.add('hidden');
   viewport.classList.add('hidden');
   landing.classList.remove('hidden');
+  isEnteringStudio = false;
+  createSessionBtn.disabled = false;
+  joinSessionBtn.disabled = false;
+  codeInput.disabled = false;
+  attachLandingPointerListeners();
 });
 
 // --- Server events ----------------------------------------------------------

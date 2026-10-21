@@ -27,23 +27,35 @@
         </button>
       </header>
       <section id="landing" class="card">
-        <h1>Lighting Teacher</h1>
+        <div class="landing-hero">
+          <h1>Lighting Teacher</h1>
+          <span class="landing-light" aria-hidden="true"></span>
+        </div>
         <p class="muted">
           CPSC 581 A2 expertise-sharing prototype. The expert frames a camera and
           lights a scene; the novice tries to replicate it from a reference image.
         </p>
-        <div class="row">
-          <button id="create-btn" class="primary">Create session (expert)</button>
-        </div>
-        <div class="row">
-          <input
-            id="join-code"
-            maxlength="5"
-            placeholder="CODE"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <button id="join-btn">Join as novice</button>
+        <div class="role-cards">
+          <section class="role-card" aria-labelledby="expert-role-title">
+            <h2 id="expert-role-title">Expert</h2>
+            <p class="muted">Set up the scene and share a lighting reference.</p>
+            <button id="create-btn" class="primary" type="button">Create session (expert)</button>
+          </section>
+          <section class="role-card" aria-labelledby="novice-role-title">
+            <h2 id="novice-role-title">Novice</h2>
+            <p class="muted">Join a session and recreate the lighting setup.</p>
+            <div class="row">
+              <input
+                id="join-code"
+                maxlength="5"
+                placeholder="CODE"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="5-character session code"
+              />
+              <button id="join-btn" type="button">Join as novice</button>
+            </div>
+          </section>
         </div>
         <p id="landing-error" class="error"></p>
       </section>
