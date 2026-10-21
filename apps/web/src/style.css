@@ -1001,7 +1001,6 @@ input {
 }
 
 .feedback-panel,
-.chat-panel,
 .diff-panel {
   margin-top: 16px;
   padding-top: 12px;
@@ -1055,10 +1054,61 @@ input {
   margin: 0 0 8px;
 }
 
+.chat-widget {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.chat-toggle {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  padding: 15px;
+  place-items: center;
+  border: 1px solid var(--soft-border);
+  border-radius: 50%;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+}
+
+.chat-toggle svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.chat-panel {
+  display: flex;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(520px, calc(100vh - 100px));
+  flex-direction: column;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+  border: 1px solid var(--soft-border);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+}
+
+.chat-panel[hidden] {
+  display: none;
+}
+
 .chat-messages {
-  max-height: 220px;
+  max-height: 240px;
   min-height: 48px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 8px 12px;
   background: var(--bg);
   border: 1px solid var(--line);
@@ -1097,6 +1147,17 @@ input {
   align-items: center;
   gap: 8px;
   margin-top: 8px;
+}
+
+@media (max-width: 760px) {
+  .chat-widget {
+    right: 12px;
+    bottom: 12px;
+  }
+
+  .chat-panel {
+    max-height: min(480px, calc(100dvh - 92px));
+  }
 }
 
 .feedback-suggestions {

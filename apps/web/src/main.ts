@@ -155,6 +155,8 @@ const audioFeedbackButtons = Array.from(
   document.querySelectorAll<HTMLButtonElement>('[data-audio-attribute]')
 );
 const chatMessages = el<HTMLDivElement>('#chat-messages');
+const chatPanel = el<HTMLElement>('#chat-panel');
+const chatToggle = el<HTMLButtonElement>('#chat-toggle');
 const chatForm = el<HTMLFormElement>('#chat-form');
 const chatInput = el<HTMLInputElement>('#chat-input');
 const chatError = el<HTMLParagraphElement>('#chat-error');
@@ -162,6 +164,13 @@ const feedbackSuggestions = el<HTMLElement>('#feedback-suggestions');
 const suggestionButtons = el<HTMLDivElement>('#suggestion-buttons');
 const diffPanel = el<HTMLElement>('#diff-panel');
 const diffSummary = el<HTMLUListElement>('#diff-summary');
+
+function setChatOpen(open: boolean): void {
+  chatPanel.hidden = !open;
+  chatToggle.setAttribute('aria-expanded', String(open));
+  chatToggle.setAttribute('aria-label', `${open ? 'Close' : 'Open'} session chat`);
+  if (open) chatInput.focus();
+}
 
 let role: Role | null = null;
 let phase: SessionMeta['phase'] = 'lobby';
@@ -1461,6 +1470,18 @@ requestHintBtn.addEventListener('click', () => {
   socket.emit('hint:request', { taskId: activeTaskId, snapshot: scene.state() });
 });
 
+chatToggle.addEventListener('click', () => {
+  setChatOpen(chatPanel.hidden);
+});
+
+chatPanel.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !chatPanel.hidden) {
+    event.preventDefault();
+    setChatOpen(false);
+    chatToggle.focus();
+  }
+});
+
 chatForm.addEventListener('submit', (event) => {
   event.preventDefault();
   const text = chatInput.value.trim();
@@ -1484,6 +1505,9 @@ leaveBtn.addEventListener('click', () => {
   role = null;
   phase = 'lobby';
   lastMeta = null;
+  chatPanel.hidden = true;
+  chatToggle.setAttribute('aria-expanded', 'false');
+  chatToggle.setAttribute('aria-label', 'Open session chat');
   clearTaskUi();
   referenceImg.removeAttribute('src');
   referenceImg.classList.add('hidden');

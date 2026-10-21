@@ -176,26 +176,40 @@
               <p id="audio-feedback-status" class="muted" role="status" aria-live="polite">Select an attribute to hear when it gets closer to the target.</p>
             </div>
           </section>
-          <section id="chat-panel" class="chat-panel">
-            <h2>Session chat</h2>
-            <div id="chat-messages" class="chat-messages" role="log" aria-live="polite"></div>
-            <div id="feedback-suggestions" class="feedback-suggestions hidden">
-              <span class="muted">Suggested feedback</span>
-              <div id="suggestion-buttons" class="suggestion-buttons"></div>
-            </div>
-            <form id="chat-form" class="chat-form">
-              <input
-                id="chat-input"
-                type="text"
-                maxlength="500"
-                autocomplete="off"
-                aria-label="Chat message"
-                placeholder="Write a message…"
-              />
-              <button type="submit">Send</button>
-            </form>
-            <p id="chat-error" class="error" role="status"></p>
-          </section>
+          <aside class="chat-widget" aria-label="Session chat">
+            <button
+              id="chat-toggle"
+              class="chat-toggle"
+              type="button"
+              aria-label="Open session chat"
+              aria-expanded="false"
+              aria-controls="chat-panel"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M4 5.75A2.75 2.75 0 0 1 6.75 3h10.5A2.75 2.75 0 0 1 20 5.75v7.5A2.75 2.75 0 0 1 17.25 16H10l-5.5 4v-6.2A2.74 2.74 0 0 1 4 12.25z" />
+              </svg>
+            </button>
+            <section id="chat-panel" class="chat-panel" aria-labelledby="chat-title" hidden>
+              <h2 id="chat-title">Session chat</h2>
+              <div id="chat-messages" class="chat-messages" role="log" aria-live="polite"></div>
+              <div id="feedback-suggestions" class="feedback-suggestions hidden">
+                <span class="muted">Suggested feedback</span>
+                <div id="suggestion-buttons" class="suggestion-buttons"></div>
+              </div>
+              <form id="chat-form" class="chat-form">
+                <input
+                  id="chat-input"
+                  type="text"
+                  maxlength="500"
+                  autocomplete="off"
+                  aria-label="Chat message"
+                  placeholder="Write a message…"
+                />
+                <button type="submit">Send</button>
+              </form>
+              <p id="chat-error" class="error" role="status"></p>
+            </section>
+          </aside>
         </section>
       </section>
 
