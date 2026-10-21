@@ -454,12 +454,27 @@ input {
   background: var(--line);
   color: var(--text);
   padding: 8px 10px;
+  transition: background-color 180ms ease, color 180ms ease;
 }
 
-.intensity-button[aria-pressed='true'] {
-  background: var(--accent);
+.intensity-button[data-intensity='low'][aria-pressed='true'] {
+  background: #86d7a4;
   color: #10131a;
   outline: 2px solid #b6d5ff;
+  outline-offset: 1px;
+}
+
+.intensity-button[data-intensity='high'][aria-pressed='true'] {
+  background: #c83d45;
+  color: #ffffff;
+  outline: 2px solid #ffb2b7;
+  outline-offset: 1px;
+}
+
+.intensity-button[data-intensity='medium'][aria-pressed='true'] {
+  background: #f2d35e;
+  color: #211b08;
+  outline: 2px solid #fff0a6;
   outline-offset: 1px;
 }
 
