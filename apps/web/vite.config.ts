@@ -2,6 +2,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  base: '/CPSC581-A2-Expertise-Sharing/',
   server: {
     allowedHosts: ['.trycloudflare.com'],
     proxy: {

@@ -28,7 +28,9 @@ import { createHeadTracker } from './headTracking.js';
 
 const CODE_LENGTH = 5;
 
-const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io();
+const socket: Socket<ServerToClientEvents, ClientToServerEvents> = io(
+  import.meta.env.VITE_SOCKET_URL || undefined,
+);
 
 function el<T extends HTMLElement>(sel: string): T {
   const node = document.querySelector(sel);

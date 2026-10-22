@@ -240,6 +240,34 @@ Run from the repository root:
 
 On Windows PowerShell, substitute `npm.cmd` for `npm` if necessary.
 
+## GitHub Pages deployment
+
+The web frontend is the `apps/web` workspace. Its build command is
+`npm run build --workspace apps/web`, which writes the deployable site to
+`apps/web/dist`. The shared workspace package is consumed as TypeScript source
+and has no separate build step.
+
+The GitHub Actions workflow deploys that directory on pushes to `main` and can
+also be run manually from the repository's **Actions** tab. Vite is configured
+for this repository's project Pages path:
+`/CPSC581-A2-Expertise-Sharing/`.
+
+GitHub Pages hosts only static files; it does not run the Express/Socket.IO
+server. The frontend uses Socket.IO's same-origin default unless the build-time
+`VITE_SOCKET_URL` variable is set. The development server separately proxies
+`/socket.io` to `http://localhost:3000`; that localhost address is development
+only and is not a production backend. To enable sessions in the deployed app,
+create a **repository variable** named `VITE_SOCKET_URL` under **Settings >
+Secrets and variables > Actions > Variables** and set it to the actual public,
+HTTPS URL of a deployed Express/Socket.IO backend. The backend must allow the
+Pages origin and support Socket.IO connections. No backend URL is configured
+or provided by this repository.
+
+The standalone `phone-controller.html` also expects Socket.IO to be served by
+the backend at `/socket.io/socket.io.js` and connects to its own origin. It
+therefore needs a backend-hosted URL (or corresponding backend integration) to
+work from GitHub Pages.
+
 ## Troubleshooting
 
 | Problem | What to check |
