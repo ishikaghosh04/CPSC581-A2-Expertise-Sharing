@@ -72,14 +72,18 @@
         <div id="role-panel" class="chips"></div>
 
         <section id="viewport" class="hidden">
+          <div id="work-task-row" class="work-task-row hidden">
+            <span class="muted">Working on</span>
+            <select id="work-task" aria-label="Task to work on"></select>
+          </div>
           <div class="studio-layout">
             <section class="studio-workspace" aria-label="3D lighting workspace">
-              <div id="work-task-row" class="work-task-row hidden">
-                <span class="muted">Working on</span>
-                <select id="work-task" aria-label="Task to work on"></select>
-              </div>
               <div id="scene-mount"></div>
               <div class="toolbar scene-toolbar" aria-label="Scene controls">
+                <span id="scene-select-row" class="scene-select-row hidden">
+                  <label for="scene-select">Scene</label>
+                  <select id="scene-select" aria-label="Scene for the next task"></select>
+                </span>
                 <button id="toggle-move" type="button">Move light</button>
                 <button id="toggle-aim" type="button">Aim light</button>
                 <button id="reset-camera" type="button">Reset camera</button>

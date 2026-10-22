@@ -41,6 +41,43 @@ export type IntensityPreset = keyof typeof INTENSITY_PRESETS;
 
 export type SessionPhase = 'lobby' | 'task' | 'submitted';
 
+/**
+ * Static 3D scene a task is staged in. Objects are shared context within a
+ * task and never change; the scene is picked per task by the expert.
+ */
+export type SceneId = 'classic' | 'desk-vignette' | 'shelf-wall' | 'arch-reveal';
+
+export interface SceneMeta {
+  id: SceneId;
+  label: string;
+  /** Short learner-facing description of the scene's challenge. */
+  blurb: string;
+}
+
+/** Scenes offered in the selector; `classic` is the tutorial placeholder. */
+export const SCENES: SceneMeta[] = [
+  {
+    id: 'classic',
+    label: 'Studio blocks',
+    blurb: 'Tutorial scene — three coloured cubes to learn the controls.',
+  },
+  {
+    id: 'desk-vignette',
+    label: 'Desk vignette',
+    blurb: 'Light the desk surface past the cabinet and chair shadows.',
+  },
+  {
+    id: 'shelf-wall',
+    label: 'Shelf wall',
+    blurb: 'Aim the beam at the shelf objects; the wall shows the light pool.',
+  },
+  {
+    id: 'arch-reveal',
+    label: 'Arch reveal',
+    blurb: 'Throw light through the arched doorway onto the statue behind it.',
+  },
+];
+
 export interface SessionMeta {
   code: string;
   phase: SessionPhase;
@@ -55,6 +92,8 @@ export interface TaskTarget {
   light: LightState;
   /** Data URL of the reference render (expert's view, helpers hidden). */
   referenceImage: string;
+  /** Which static scene the task is staged in. */
+  scene: SceneId;
 }
 
 export interface TaskDiff {
@@ -105,6 +144,8 @@ export interface TaskStart {
   taskId: number;
   /** Data URL of the reference render (expert's view, light source hidden). */
   referenceImage: string;
+  /** Scene the novice should load before starting to work. */
+  scene: SceneId;
 }
 
 export interface ChatMessage {
@@ -117,6 +158,8 @@ export interface TaskEntry {
   id: number;
   /** Data URL of the reference render (expert's view, helpers hidden). */
   referenceImage: string;
+  /** Scene the task is staged in, so both peers render the same objects. */
+  scene: SceneId;
   /** Wall-clock publish time (epoch ms) for labelling. */
   createdAt: number;
 }
@@ -126,6 +169,8 @@ export interface Attempt {
   id: number;
   /** The published task this attempt belongs to. */
   taskId: number;
+  /** Scene snapshot we were working in (mirrors the task's scene). */
+  scene: SceneId;
   /** Data URL of the novice's render at submit time. */
   image: string;
   camera: CameraState;
@@ -134,8 +179,8 @@ export interface Attempt {
   createdAt: number;
 }
 
-/** What the novice sends on submit (id and timestamp are server-assigned; taskId picks the target task). */
-export type AttemptPayload = Omit<Attempt, 'id' | 'createdAt'>;
+/** What the novice sends on submit (id, scene and timestamp are server-assigned; taskId picks the target task). */
+export type AttemptPayload = Omit<Attempt, 'id' | 'createdAt' | 'scene'>;
 
 /** A role's live scene state, streamed while working. */
 export interface StateSnapshot {
