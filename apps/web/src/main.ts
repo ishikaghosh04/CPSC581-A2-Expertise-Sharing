@@ -1,6 +1,6 @@
 import { io, type Socket } from 'socket.io-client';
 
-import { DEFAULT_TOLERANCES, INTENSITY_PRESETS } from '@expertise-sharing/shared';
+import { DEFAULT_TOLERANCES, INTENSITY_PRESETS, SCENES } from '@expertise-sharing/shared';
 import type {
   Attempt,
   AttemptFeedback,
@@ -10,6 +10,7 @@ import type {
   ClientToServerEvents,
   IntensityPreset,
   Role,
+  SceneId,
   ServerToClientEvents,
   SessionMeta,
   StateSnapshot,
@@ -179,6 +180,8 @@ const feedbackNotice = el<HTMLDivElement>('#feedback-notice');
 const feedbackNoticeButton = el<HTMLButtonElement>('#feedback-notice-button');
 const workTaskRow = el<HTMLElement>('#work-task-row');
 const workTaskSelect = el<HTMLSelectElement>('#work-task');
+const sceneSelectRow = el<HTMLElement>('#scene-select-row');
+const sceneSelect = el<HTMLSelectElement>('#scene-select');
 const taskSelect = el<HTMLSelectElement>('#task-select');
 const attemptSelect = el<HTMLSelectElement>('#attempt-select');
 const attemptImage = el<HTMLImageElement>('#attempt-image');
@@ -221,6 +224,8 @@ let phase: SessionMeta['phase'] = 'lobby';
 let lastMeta: SessionMeta | null = null;
 let scene: SceneHandle | null = null;
 let selectedIntensityPreset: IntensityPreset = 'medium';
+/** Static scene currently staged in the 3D view. */
+let activeScene: SceneId = 'classic';
 type InputMode = 'manual' | 'hand' | 'voice';
 let selectedInputMode: InputMode = 'manual';
 let handController: HandGestureController | null = null;
@@ -425,7 +430,12 @@ function publishTask(): void {
     .captureReference()
     .then((referenceImage) => {
       const { camera, light } = scene!.state();
-      socket.emit('task:publish', { camera, light, referenceImage });
+      socket.emit('task:publish', {
+        camera,
+        light,
+        referenceImage,
+        scene: activeScene,
+      });
     })
     .catch((err: unknown) => {
       console.error('reference capture failed', err);
@@ -522,6 +532,27 @@ function mountScene(): void {
     role === 'expert' ? previewCanvas : undefined
   );
   scene.setIntensityPreset(selectedIntensityPreset);
+  // The scene handle starts on `classic`; catch up if a task already set one.
+  scene.setScene(activeScene);
+}
+
+function sceneLabel(id: SceneId): string {
+  return SCENES.find((item) => item.id === id)?.label ?? id;
+}
+
+/** Swap the staged scene, reset camera/light to that scene's defaults. */
+function switchScene(id: SceneId): void {
+  activeScene = id;
+  sceneSelect.value = id;
+  scene?.setScene(id);
+  applyIntensityPreset('medium');
+}
+
+/** Novices don't pick scenes: they follow the scene of the task they work on. */
+function syncSceneFromTask(taskId: number | null): void {
+  if (role !== 'novice') return;
+  const task = tasks.find((item) => item.id === taskId);
+  if (task && task.scene !== activeScene) switchScene(task.scene);
 }
 
 function setIntensity(preset: IntensityPreset, source: InputMode): void {
@@ -1030,6 +1061,10 @@ function updateRoleButtons(meta: SessionMeta): void {
   if (canPublish && publishButtonState === 'published') setPublishButtonState('ready');
   const taskLive = meta.phase === 'task' || meta.phase === 'submitted';
   submitBtn.classList.toggle('hidden', !(role === 'novice' && taskLive));
+  // Scene selector: expert-only, switchable at any time — the current task's
+  // snapshots stay intact; switching just restages the next task.
+  sceneSelectRow.classList.toggle('hidden', role !== 'expert');
+  sceneSelect.disabled = role !== 'expert';
 }
 
 /** Right-hand slot of the viewport row: expert sees the live preview, novice the selected task's reference. */
@@ -1056,6 +1091,7 @@ function refreshWorkSelect(selectTaskId?: number): void {
   } else {
     activeTaskId = null;
   }
+  syncSceneFromTask(activeTaskId);
   syncAudioFeedbackSelection();
 }
 
@@ -1073,7 +1109,8 @@ function renderMeta(meta: SessionMeta): void {
   rolePanel.replaceChildren(
     chip(`Expert ${meta.expertPresent ? 'connected' : 'not connected'}`, meta.expertPresent),
     chip(`Novice ${meta.novicePresent ? 'connected' : 'not connected'}`, meta.novicePresent),
-    chip(`Phase: ${meta.phase}${meta.submitted ? ' (attempt submitted)' : ''}`)
+    chip(`Phase: ${meta.phase}${meta.submitted ? ' (attempt submitted)' : ''}`),
+    chip(`Scene: ${sceneLabel(activeScene)}`)
   );
 
   if (role === 'novice' && meta.phase === 'lobby') {
@@ -1211,6 +1248,24 @@ headTrackingBtn.addEventListener('click', async () => {
 });
 
 refreshHandleButtons();
+
+// Scene selector: populate once; visibility/gating in updateRoleButtons.
+sceneSelect.replaceChildren(
+  ...SCENES.map((meta) => {
+    const option = document.createElement('option');
+    option.value = meta.id;
+    option.textContent = meta.label;
+    option.title = meta.blurb;
+    return option;
+  })
+);
+sceneSelect.addEventListener('change', () => {
+  if (role !== 'expert') {
+    sceneSelect.value = activeScene;
+    return;
+  }
+  switchScene(sceneSelect.value as SceneId);
+});
 
 intensityButtons.forEach((button) => {
   button.addEventListener('click', () => {
@@ -1530,6 +1585,8 @@ sendAttemptFeedbackBtn.addEventListener('click', () => {
 
 workTaskSelect.addEventListener('change', () => {
   activeTaskId = Number(workTaskSelect.value);
+  // The scene follows the selected task (scene per task).
+  syncSceneFromTask(activeTaskId);
   hintText.textContent = 'Hints are optional.';
   audioFeedbackStatus.textContent = selectedAudioAttribute
     ? `${audioFeedbackLabel(selectedAudioAttribute)} selected. Adjust it to hear progress cues.`
@@ -1601,6 +1658,8 @@ leaveBtn.addEventListener('click', () => {
   chatToggle.setAttribute('aria-expanded', 'false');
   chatToggle.setAttribute('aria-label', 'Open session chat');
   clearTaskUi();
+  // back to the tutorial staging for the next session in this tab
+  switchScene('classic');
   referenceImg.removeAttribute('src');
   referenceImg.classList.add('hidden');
   rolePanel.replaceChildren();
@@ -1641,6 +1700,8 @@ socket.on('task:start', ({ taskId }) => {
     pendingSubmissionTaskId = null;
     setActionStatus('');
     hintText.textContent = 'Hints are optional.';
+    // Load the scene the task was staged in before starting to work.
+    syncSceneFromTask(taskId);
     syncAudioFeedbackSelection();
   }
   if (lastMeta) updateSideView();

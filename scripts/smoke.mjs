@@ -37,10 +37,14 @@ const main = async () => {
     camera: { position: { x: 0, y: 1.6, z: 3 }, target: { x: 0, y: 1, z: 0 } },
     light: { position: { x: 1, y: 2, z: 2 }, target: { x: 0, y: 1, z: 0 }, intensity: 1.5 },
     referenceImage: 'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+    scene: 'shelf-wall',
   });
   const [start1] = await publish1;
   if (start1.taskId !== 1) {
     throw new Error(`expected task:start id 1, got ${start1.taskId}`);
+  }
+  if (start1.scene !== 'shelf-wall') {
+    throw new Error(`expected task:start scene shelf-wall, got ${start1.scene}`);
   }
   log('novice received task:start, reference image bytes =', start1.referenceImage.length);
 
@@ -76,6 +80,9 @@ const main = async () => {
   const r1 = await review1;
   if (a1.id !== 1 || a1.taskId !== 1) {
     throw new Error(`expected attempt id 1 task 1, got id=${a1.id} taskId=${a1.taskId}`);
+  }
+  if (a1.scene !== 'shelf-wall') {
+    throw new Error(`expected attempt scene shelf-wall (from task), got ${a1.scene}`);
   }
   if (
     submissionMessage1.from !== 'novice' ||
@@ -162,10 +169,14 @@ const main = async () => {
     camera: { position: { x: 2, y: 1.6, z: 4 }, target: { x: 0, y: 1, z: 0 } },
     light: { position: { x: 0, y: 2, z: 2 }, target: { x: 0, y: 1, z: 0 }, intensity: 1 },
     referenceImage: IMAGE,
+    scene: 'arch-reveal',
   });
   const [start2, taskEntry2] = await publish2;
   if (taskEntry2.id !== 2) {
     throw new Error(`expected task id 2, got ${taskEntry2.id}`);
+  }
+  if (taskEntry2.scene !== 'arch-reveal' || start2.scene !== 'arch-reveal') {
+    throw new Error(`expected arch-reveal scene, got task=${taskEntry2.scene} start=${start2.scene}`);
   }
   if (start2.taskId !== 2) {
     throw new Error(`expected task:start id 2, got ${start2.taskId}`);

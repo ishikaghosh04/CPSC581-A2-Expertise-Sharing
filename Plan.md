@@ -47,7 +47,7 @@ TypeScript monorepo, no DB (in-memory sessions):
 Each step leaves a working milestone:
 
 1. **Scaffold** — monorepo layout, server, join-by-code, role screens (expert/novice).
-2. **3D scene** — room, floor, simple object, spotlight with shadows; camera orbit; gizmo light editing; intensity slider; resets.
+2. **3D scene** — room, floor, simple object, spotlight with shadows; camera orbit; gizmo light editing; intensity slider; resets. Multiple static scenes (`classic`, desk vignette, shelf-wall, arch reveal) in `apps/web/src/scenes.ts`; the expert picks the staging scene per published task and the novice's view follows it.
 3. **Publish pipeline** — offscreen hidden-light render → reference image on the novice screen; task state stored in memory. [We are done this step!]
 4. **Chat** — text chat both ways; expert views both submissions side-by-side at submit time.
 5. **Embodied inputs** (phase 2), one at a time, phone aiming first — because whether it feels natural affects the design. Keep light position on buttons/keyboard while testing.

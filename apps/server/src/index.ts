@@ -14,6 +14,7 @@ import type {
   ClientToServerEvents,
   LightState,
   Role,
+  SceneId,
   ServerToClientEvents,
   StateSnapshot,
   TaskTarget,
@@ -24,6 +25,7 @@ import {
   DEFAULT_TOLERANCES,
   feedbackSuggestions,
   nextTaskHint,
+  SCENES,
 } from '@expertise-sharing/shared';
 
 import { renderReferencePlaceholder } from './reference.js';
@@ -161,10 +163,14 @@ io.on('connection', (socket) => {
     ack({ ok: true, role, meta: sessionMeta(session) });
     // Late joiners see the current reference image straight away.
     if (session.phase === 'task' && session.referenceImage && session.currentTaskId !== null) {
-      socket.emit('task:start', {
-        taskId: session.currentTaskId,
-        referenceImage: session.referenceImage,
-      });
+      const currentTask = session.tasks.find((task) => task.id === session.currentTaskId);
+      if (currentTask) {
+        socket.emit('task:start', {
+          taskId: currentTask.id,
+          referenceImage: session.referenceImage,
+          scene: currentTask.scene,
+        });
+      }
     }
     if (session.attempts.length > 0) {
       socket.emit('attempts:current', session.attempts);
@@ -211,14 +217,18 @@ io.on('connection', (socket) => {
     selection.lastDistance = distance;
   });
 
-  socket.on('task:publish', ({ camera, light, referenceImage }) => {
+  socket.on('task:publish', ({ camera, light, referenceImage, scene: requestedScene }) => {
     const session = sessionOf();
     if (!session || role !== 'expert') return;
+    // Scenes are shared context; an unknown/missing id falls back to classic.
+    const sceneId: SceneId = SCENES.some((item) => item.id === requestedScene)
+      ? requestedScene
+      : 'classic';
     // Use the expert-side capture when present; otherwise fall back to a placeholder.
     session.referenceImage =
       typeof referenceImage === 'string' && referenceImage.startsWith('data:image/')
         ? referenceImage
-        : renderReferencePlaceholder({ camera, light, referenceImage });
+        : renderReferencePlaceholder({ camera, light, referenceImage, scene: sceneId });
     session.phase = 'task';
     session.submitted = false;
 
@@ -226,12 +236,14 @@ io.on('connection', (socket) => {
     const task: TaskEntry = {
       id: session.nextTaskId++,
       referenceImage: session.referenceImage,
+      scene: sceneId,
       createdAt: Date.now(),
     };
     const target: TaskTarget = {
       camera,
       light,
       referenceImage: session.referenceImage,
+      scene: sceneId,
     };
     session.taskTargets.set(task.id, target);
     session.tasks.push(task);
@@ -239,6 +251,7 @@ io.on('connection', (socket) => {
     io.to(session.code).emit('task:start', {
       taskId: task.id,
       referenceImage: session.referenceImage,
+      scene: sceneId,
     });
     io.to(session.code).emit('task:published', task);
     io.to(session.code).emit('session:meta', sessionMeta(session));
@@ -304,6 +317,7 @@ io.on('connection', (socket) => {
     const attempt: Attempt = {
       id: session.nextAttemptId++,
       taskId,
+      scene: target.scene,
       image: payload.image,
       camera: payload.camera,
       light: payload.light,

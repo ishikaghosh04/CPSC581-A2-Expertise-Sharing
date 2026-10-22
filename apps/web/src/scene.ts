@@ -7,23 +7,18 @@ import {
   type CameraState,
   type IntensityPreset,
   type LightState,
+  type SceneId,
 } from '@expertise-sharing/shared';
 
+import { sceneDefinition } from './scenes.js';
+
 /**
- * The shared 3D workspace (build step 2). Every role gets its own camera and
- * its own light in an identical static room; the objects never change.
+ * The shared 3D workspace (build step 2, extended with a per-task scene
+ * selector). Every role gets its own camera and its own light in an identical
+ * static scene; the objects never change. Scenes come from `scenes.ts`.
  */
 
-export const DEFAULT_CAMERA: CameraState = {
-  position: { x: 4.5, y: 3.2, z: 6 },
-  target: { x: 0, y: 0.8, z: 0 },
-};
-
-export const DEFAULT_LIGHT: LightState = {
-  position: { x: 2.5, y: 3.0, z: 2.0 },
-  target: { x: -0.5, y: 0.6, z: 0 },
-  intensity: INTENSITY_PRESETS.medium,
-};
+const INITIAL_SCENE: SceneId = 'classic';
 
 /** Which gizmo is currently attached in Move light / Aim light. */
 export type LightHandle = 'bulb' | 'aim';
@@ -37,6 +32,8 @@ export interface SceneHandle {
   setHandle(handle: LightHandle): void;
   setHeadOffset(x: number, y: number): void;
   setPhoneAim(x: number, y: number, z: number): void;
+  /** Swap the static scene, resetting camera and light to its defaults. */
+  setScene(id: SceneId): void;
   resetCamera(): void;
   resetLight(): void;
   dispose(): void;
@@ -45,41 +42,16 @@ export interface SceneHandle {
 const clamp = (n: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, n));
 
-function buildRoom(scene: THREE.Scene): void {
-  // Light grey floor: shows off pools of light and shadows.
-  const floor = new THREE.Mesh(
-    new THREE.PlaneGeometry(10, 10),
-    new THREE.MeshStandardMaterial({ color: 0x9a9aa2, roughness: 0.9 })
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
-  scene.add(floor);
-
-  // Back wall — gives the light something to graze and shadow against.
-  const wall = new THREE.Mesh(
-    new THREE.PlaneGeometry(10, 3),
-    new THREE.MeshStandardMaterial({ color: 0x84848e, roughness: 0.95 })
-  );
-  wall.position.set(0, 1.5, -5);
-  wall.receiveShadow = true;
-  scene.add(wall);
-
-  // A few coloured cubes (placeholder scene per plan).
-  const cubes: Array<[color: number, pos: [number, number, number], size: number]> = [
-    [0xf2a7b3, [-1.3, 0.5, -0.6], 1.0],
-    [0xb2e8d0, [0.6, 0.9, -1.6], 1.8],
-    [0xb3bdf2, [1.6, 0.6, 0.9], 1.2],
-  ];
-  for (const [color, [x, y, z], size] of cubes) {
-    const cube = new THREE.Mesh(
-      new THREE.BoxGeometry(size, size, size),
-      new THREE.MeshStandardMaterial({ color, roughness: 0.6 })
-    );
-    cube.position.set(x, y, z);
-    cube.castShadow = true;
-    cube.receiveShadow = true;
-    scene.add(cube);
-  }
+/** Dispose the geometries and materials of a scene group before removal. */
+function disposeGroup(group: THREE.Group): void {
+  group.traverse((object) => {
+    if (object instanceof THREE.Mesh) {
+      object.geometry.dispose();
+      const mat = object.material;
+      if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
+      else mat.dispose();
+    }
+  });
 }
 
 export function createScene(
@@ -103,10 +75,20 @@ export function createScene(
   // Bright fill so nothing is pitch black before the spot is placed.
   scene.add(new THREE.HemisphereLight(0x505070, 0x1c1c24, 0.45));
 
-  buildRoom(scene);
+  // Static scene objects live in their own group so they can be swapped per task.
+  let currentSceneId: SceneId = INITIAL_SCENE;
+  let staticGroup = sceneDefinition(currentSceneId).build();
+  scene.add(staticGroup);
+  const defaults = (): { camera: CameraState; light: LightState } =>
+    sceneDefinition(currentSceneId);
 
-  const spot = new THREE.SpotLight(0xffffff, DEFAULT_LIGHT.intensity);
-  spot.position.set(DEFAULT_LIGHT.position.x, DEFAULT_LIGHT.position.y, DEFAULT_LIGHT.position.z);
+  const initialLight = defaults().light;
+  const spot = new THREE.SpotLight(0xffffff, initialLight.intensity);
+  spot.position.set(
+    initialLight.position.x,
+    initialLight.position.y,
+    initialLight.position.z
+  );
   spot.angle = 0.65;
   spot.penumbra = 0.45;
   spot.decay = 1.0;
@@ -131,9 +113,9 @@ export function createScene(
     new THREE.MeshBasicMaterial({ color: 0x5a9dfd })
   );
   aimMarker.position.set(
-    DEFAULT_LIGHT.target.x,
-    DEFAULT_LIGHT.target.y,
-    DEFAULT_LIGHT.target.z
+    initialLight.target.x,
+    initialLight.target.y,
+    initialLight.target.z
   );
   scene.add(aimMarker);
   spot.target = aimMarker;
@@ -151,12 +133,21 @@ export function createScene(
     0.1,
     100
   );
-  camera.position.set(DEFAULT_CAMERA.position.x, DEFAULT_CAMERA.position.y, DEFAULT_CAMERA.position.z);
+  const initialCamera = defaults().camera;
+  camera.position.set(
+    initialCamera.position.x,
+    initialCamera.position.y,
+    initialCamera.position.z
+  );
 
   const orbit = new OrbitControls(camera, renderer.domElement);
   orbit.enableDamping = true;
   orbit.dampingFactor = 0.08;
-  orbit.target.set(DEFAULT_CAMERA.target.x, DEFAULT_CAMERA.target.y, DEFAULT_CAMERA.target.z);
+  orbit.target.set(
+    initialCamera.target.x,
+    initialCamera.target.y,
+    initialCamera.target.z
+  );
   // Head tracking controls
   let headOffset = { x: 0, y: 0 };
 
@@ -173,10 +164,11 @@ export function createScene(
     direction.normalize();
 
     // Original spotlight direction.
+    const initialAim = defaults().light;
     const defaultDirection = new THREE.Vector3(
-      DEFAULT_LIGHT.target.x - DEFAULT_LIGHT.position.x,
-      DEFAULT_LIGHT.target.y - DEFAULT_LIGHT.position.y,
-      DEFAULT_LIGHT.target.z - DEFAULT_LIGHT.position.z
+      initialAim.target.x - initialAim.position.x,
+      initialAim.target.y - initialAim.position.y,
+      initialAim.target.z - initialAim.position.z
     );
 
     const distance = defaultDirection.length();
@@ -257,13 +249,32 @@ export function createScene(
   };
 
   const resetCamera = (): void => {
-    camera.position.set(DEFAULT_CAMERA.position.x, DEFAULT_CAMERA.position.y, DEFAULT_CAMERA.position.z);
-    orbit.target.set(DEFAULT_CAMERA.target.x, DEFAULT_CAMERA.target.y, DEFAULT_CAMERA.target.z);
+    camera.position.set(
+      defaults().camera.position.x,
+      defaults().camera.position.y,
+      defaults().camera.position.z
+    );
+    orbit.target.set(
+      defaults().camera.target.x,
+      defaults().camera.target.y,
+      defaults().camera.target.z
+    );
     orbit.update();
   };
 
   const resetLight = (): void => {
-    applyLight(DEFAULT_LIGHT);
+    applyLight(defaults().light);
+  };
+
+  const setScene = (id: SceneId): void => {
+    if (id === currentSceneId) return;
+    scene.remove(staticGroup);
+    disposeGroup(staticGroup);
+    currentSceneId = id;
+    staticGroup = sceneDefinition(id).build();
+    scene.add(staticGroup);
+    resetCamera();
+    resetLight();
   };
 
   // --- Lifecycle -------------------------------------------------------
@@ -391,6 +402,7 @@ export function createScene(
     setPhoneAim,
     setIntensityPreset,
     setHandle,
+    setScene,
     resetCamera,
     resetLight,
     dispose(): void {
@@ -402,6 +414,7 @@ export function createScene(
       previewResizeObserver?.disconnect();
       transform.dispose();
       orbit.dispose();
+      disposeGroup(staticGroup);
       renderer.dispose();
       previewRenderer?.dispose();
     },

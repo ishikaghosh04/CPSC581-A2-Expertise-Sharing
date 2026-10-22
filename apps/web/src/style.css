@@ -583,6 +583,37 @@ input {
   color: var(--text);
 }
 
+.scene-select-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+}
+
+.scene-select-row label {
+  color: var(--muted);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+#scene-select {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 0.82rem;
+  font-family: inherit;
+  width: auto;
+  max-width: 180px;
+  margin: 0;
+}
+
+#scene-select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .studio-reference {
   gap: 8px;
 }
